@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>텍사스 홀덤 - 싱글 플레이</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="app">
+  <header class="topbar">
+    <div class="brand"><span class="pip">&spades;</span> 텍사스 홀덤</div>
+    <div class="meta">
+      <span>핸드 <b id="handNo">-</b></span>
+      <span class="sep">·</span>
+      <span>블라인드 <b id="blinds">-</b></span>
+      <span class="sep">·</span>
+      <span>내 칩 <b id="heroChips">-</b></span>
+    </div>
+    <div class="topbtns">
+      <button class="ghost" id="btnSound" title="소리 켜기/끄기">&#128266;</button>
+      <button class="ghost" id="btnLogToggle">기록</button>
+      <button class="ghost" id="btnRestart">새 게임</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="felt" id="felt">
+      <div class="table-center">
+        <div class="pot-badge">팟 <b id="potAmt">0</b></div>
+        <div class="community" id="community"></div>
+        <div class="street-label" id="streetLabel"></div>
+      </div>
+      <div class="seats" id="seats"></div>
+      <div class="result-banner" id="resultBanner"></div>
+    </div>
+
+    <aside class="logpanel" id="logPanel">
+      <h3>핸드 기록</h3>
+      <div class="loglist" id="logList"></div>
+    </aside>
+  </main>
+
+  <section class="controls" id="controls">
+    <div class="hero-readout">
+      <span id="heroHand" class="hero-hand"></span>
+      <span id="heroEquity" class="hero-equity"></span>
+    </div>
+
+    <div class="action-area">
+      <div class="btn-row" id="btnRow">
+        <button class="act danger" id="btnFold">폴드 <kbd>F</kbd></button>
+        <button class="act" id="btnCall">체크 <kbd>C</kbd></button>
+        <button class="act gold" id="btnRaise">레이즈 <kbd>R</kbd></button>
+      </div>
+
+      <div class="raise-row" id="raiseRow">
+        <input type="range" id="raiseSlider" min="0" max="100" value="0">
+        <div class="presets">
+          <button data-pct="0.5">&frac12; 팟</button>
+          <button data-pct="0.75">&frac34; 팟</button>
+          <button data-pct="1">팟</button>
+          <button data-pct="allin">올인</button>
+        </div>
+      </div>
+
+      <div class="waiting" id="waiting"></div>
+      <button class="act next" id="btnNext">다음 핸드 <kbd>Space</kbd></button>
+    </div>
+  </section>
+</div>
+
+<!-- 시작 / 설정 화면 -->
+<div class="modal" id="setupModal">
+  <div class="modal-box">
+    <h2><span class="pip">&spades;</span> 텍사스 홀덤</h2>
+    <p class="sub">AI 상대와 1:N 으로 즐기는 노리밋 홀덤</p>
+
+    <label class="field">
+      <span>상대 수</span>
+      <select id="optBots">
+        <option value="1">1명 (헤즈업)</option>
+        <option value="2">2명</option>
+        <option value="3" selected>3명</option>
+        <option value="4">4명</option>
+        <option value="5">5명</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>시작 칩</span>
+      <select id="optChips">
+        <option value="500">500 (25 BB)</option>
+        <option value="1000" selected>1,000 (50 BB)</option>
+        <option value="2000">2,000 (100 BB)</option>
+        <option value="5000">5,000 (250 BB)</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>블라인드</span>
+      <select id="optBlinds">
+        <option value="5">5 / 10</option>
+        <option value="10" selected>10 / 20</option>
+        <option value="25">25 / 50</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>블라인드 상승</span>
+      <select id="optBlindUp">
+        <option value="0" selected>없음</option>
+        <option value="10">10핸드마다 2배</option>
+        <option value="20">20핸드마다 2배</option>
+      </select>
+    </label>
+
+    <label class="field">
+      <span>AI 속도</span>
+      <select id="optSpeed">
+        <option value="350">빠름</option>
+        <option value="750" selected>보통</option>
+        <option value="1300">느긋함</option>
+      </select>
+    </label>
+
+    <label class="field check">
+      <input type="checkbox" id="optEquity" checked>
+      <span>내 승률(에쿼티) 표시</span>
+    </label>
+
+    <button class="act gold big" id="btnStart">게임 시작</button>
+    <p class="hint">단축키 &mdash; F: 폴드 / C: 체크·콜 / R: 레이즈 / Space: 다음 핸드</p>
+  </div>
+</div>
+
+<!-- 게임 종료 -->
+<div class="modal" id="overModal">
+  <div class="modal-box">
+    <h2 id="overTitle">게임 종료</h2>
+    <p class="sub" id="overText"></p>
+    <button class="act gold big" id="btnOverRestart">다시 시작</button>
+  </div>
+</div>
+
+<script src="js/cards.js"></script>
+<script src="js/evaluator.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/ui.js"></script>
+</body>
+</html>

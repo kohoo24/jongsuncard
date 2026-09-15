@@ -1,0 +1,11 @@
+{
+  "name": "texas-holdem",
+  "version": "1.0.0",
+  "description": "AI 상대와 혼자 즐기는 텍사스 홀덤 (브라우저, 의존성 없음)",
+  "private": true,
+  "scripts": {
+    "test": "node test/run-tests.js",
+    "start": "python3 -m http.server 8000"
+  },
+  "license": "MIT"
+}
