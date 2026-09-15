@@ -476,7 +476,7 @@
       const a0 = game.actionsFor(player);
       return { type: a0.canCheck ? 'check' : 'call', think: {} };
     }
-    const a = ctx.a, diff = ctx.diff;
+    const a = ctx.a;
 
     let d = game.street === 'preflop' ? preflop(ctx) : postflop(ctx);
     d = applyMistakes(ctx, d);

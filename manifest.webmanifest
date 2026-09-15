@@ -1,0 +1,14 @@
+{
+  "name": "텍사스 홀덤",
+  "short_name": "홀덤",
+  "description": "AI 상대와 혼자 즐기는 노리밋 텍사스 홀덤",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1310",
+  "theme_color": "#0b1310",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -181,6 +181,7 @@
       'You took every chip. {n} hands to clear the table.'],
     'over.loseText': ['{n}핸드 만에 칩을 모두 잃었습니다.', 'You lost your stack after {n} hands.'],
     'over.place': ['{place}위로 마쳤습니다.', 'You finished in place {place}.'],
+    'over.rebuyPlain': ['리바이', 'Rebuy'],
     'over.restart': ['다시 시작', 'Play again'],
     'over.rebuy': ['리바이 ({amount})', 'Rebuy ({amount})'],
 

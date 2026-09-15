@@ -1123,7 +1123,6 @@ test('머크한 카드는 기록에 남되 텍스트에서는 가려진다', fun
   const seat = muckedHand.seats.filter(function (s) { return s.mucked && !s.isHuman; })[0];
   eq(seat.cards.length, 2, '기록에는 남아 있어야 리플레이가 가능하다');
   const txt = H.history.toText(muckedHand);
-  const line = txt.split('\n').filter(function (l) { return l.indexOf(seat.name) === 0 || l.indexOf('  ' + seat.name) >= 0; })[0];
   assert(txt.indexOf('??') >= 0, '텍스트에서는 가려져야 한다');
 });
 test('JSON 왕복', function () {

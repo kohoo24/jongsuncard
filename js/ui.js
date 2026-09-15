@@ -29,7 +29,7 @@
     game: null, tracker: null, recorder: null, settings: null,
     seatEls: {}, communityRendered: 0, timer: null, clockTimer: null,
     heroInfo: null, drawInfo: null, reviewItems: [], lastSummary: null, handFinalized: false,
-    tab: 'log', chartState: { position: 'BTN', playerCount: 6, heroKey: null },
+    tab: 'log', chartState: { position: 'BTN', playerCount: 6, heroKey: null, userPicked: false },
     sound: true, winningCards: [], busy: false
   };
   global.HoldemUI = state;
@@ -672,6 +672,7 @@
     state.winningCards = [];
     state.reviewItems = [];
     state.handFinalized = false;
+    state.chartState.userPicked = false;
     state.tracker.startHand(g);
     g.startHand();
     if (g.phase === 'game-over') { loop(); return; }
@@ -703,7 +704,10 @@
       const hero = state.game.byId(HERO_ID);
       if (hero && hero.cards.length === 2) {
         state.chartState.heroKey = H.ranges.classOf(hero.cards[0], hero.cards[1]);
-        state.chartState.position = state.game.position(hero) || state.chartState.position;
+        // 사용자가 직접 포지션을 골랐다면 그대로 둔다
+        if (!state.chartState.userPicked) {
+          state.chartState.position = state.game.position(hero) || state.chartState.position;
+        }
       }
       H.panels.renderChart(host, state.chartState);
     }

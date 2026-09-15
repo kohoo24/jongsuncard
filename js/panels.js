@@ -329,6 +329,7 @@
       b.type = 'button';
       b.addEventListener('click', function () {
         state.position = pos;
+        state.userPicked = true;   // 내 포지션으로 되돌아가지 않게 한다
         H.panels.renderChart(host, state);
       });
       bar.appendChild(b);

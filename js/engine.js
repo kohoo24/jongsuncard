@@ -420,7 +420,7 @@
       if (target > a.maxRaiseTo) target = a.maxRaiseTo;
       if (target < a.minRaiseTo && target !== a.maxRaiseTo) target = a.minRaiseTo;
       const prevBet = this.currentBet;
-      const paid = this.putIn(p, target - p.bet);
+      this.putIn(p, target - p.bet);
       const raiseBy = p.bet - prevBet;
       if (raiseBy >= this.minRaise) this.minRaise = raiseBy;
       if (p.bet > this.currentBet) {
