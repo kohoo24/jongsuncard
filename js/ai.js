@@ -268,43 +268,39 @@
   }
 
   /* ---------- 포스트플랍 ---------- */
-  function postflop(ctx) {
-    const game = ctx.game, player = ctx.player, a = ctx.a, prof = ctx.prof, diff = ctx.diff, rand = ctx.rand;
+
+  /**
+   * 현재 상황의 모든 선택지를 EV 와 함께 평가한다.
+   * AI 의 의사결정과 핸드 리뷰가 같은 계산을 공유한다.
+   */
+  function evaluateOptions(ctx) {
+    const game = ctx.game, player = ctx.player, a = ctx.a, prof = ctx.prof, diff = ctx.diff;
     const pot = ctx.pot, toCall = a.toCall;
 
     const holeCodes = [H.cards.code(player.cards[0]), H.cards.code(player.cards[1])];
     const boardCodes = game.community.map(H.cards.code);
-    const dist = E.boardDistribution(boardCodes, holeCodes);
+    const dist = boardCodes.length >= 3 ? E.boardDistribution(boardCodes, holeCodes) : null;
 
     const ranges = ctx.opponents.map(function (o) { return inferRange(ctx, o); });
     const combos = ranges.map(function (r) { return E.buildCombos(r, boardCodes, holeCodes, dist); });
-    const seed = (rand() * 4294967295) >>> 0;
+    const seed = (ctx.rand() * 4294967295) >>> 0;
     const eq = E.vsRanges({
       hole: holeCodes, board: boardCodes, combos: combos, sims: diff.sims, seed: seed
     }).equity;
 
-    const myValue = H.eval.score(player.cards.concat(game.community));
-    const topPct = E.pctOfValue(dist, myValue);
-
-    ctx.think.equity = eq;
-    ctx.think.topPct = topPct;
-    ctx.think.rangeHi = ranges[0] ? ranges[0].band.hi : 1;
-    ctx.think.potOdds = toCall > 0 ? toCall / (pot + toCall) : 0;
-
-    /* 에쿼티 실현율: 포지션이 나쁘면 끝까지 가기 어렵다 */
+    const topPct = dist ? E.pctOfValue(dist, H.eval.score(player.cards.concat(game.community))) : null;
     const inPos = isInPosition(ctx);
+    // 에쿼티 실현율: 포지션이 나쁘면 끝까지 가기 어렵다
     const rz = game.street === 'river' ? 1 : (inPos ? 0.90 : 0.80);
-    ctx.think.inPosition = inPos;
 
     const candidates = [];
     if (a.canCheck) {
       candidates.push({ type: 'check', ev: eq * pot * rz, tag: 'check' });
     } else {
       candidates.push({ type: 'fold', ev: 0, tag: 'fold' });
-      candidates.push({ type: 'call', ev: eq * pot * rz - (1 - eq) * toCall, tag: 'call' });
+      candidates.push({ type: 'call', amount: toCall, ev: eq * pot * rz - (1 - eq) * toCall, tag: 'call' });
     }
 
-    /* 후보 베팅 사이즈들의 EV 를 비교한다 */
     if (a.canRaise) {
       const targets = [];
       (diff.sizeGrid || [0.45, 0.72, 1.10]).forEach(function (f) {
@@ -313,6 +309,11 @@
         if (targets.indexOf(c) === -1) targets.push(c);
       });
       if (targets.indexOf(a.maxRaiseTo) === -1 && a.maxRaiseTo <= pot * 2.2) targets.push(a.maxRaiseTo);
+      // 리뷰에서 "실제로 낸 금액"의 EV 도 필요하므로 외부에서 사이즈를 추가할 수 있다
+      (ctx.opts.extraSizes || []).forEach(function (v) {
+        const c = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, Math.round(v)));
+        if (targets.indexOf(c) === -1) targets.push(c);
+      });
 
       targets.forEach(function (target) {
         const myCost = target - player.bet;
@@ -342,7 +343,7 @@
         }
 
         /* (1-pFoldAll) 은 "적어도 한 명이 콜" 확률이다. 전원이 콜한다고 보면
-           이길 때 받는 팟을 과대평가하게 되므로 기대 콜러 수로 나눠 쓴다. */
+           이길 때 받는 팟을 과대평가하게 되므로 기대 콜러 수로 환산해 쓴다. */
         const pCalled = 1 - pFoldAll;
         const callers = pCalled > 0
           ? Math.max(1, Math.min(ranges.length, expCallers / pCalled))
@@ -353,15 +354,32 @@
         candidates.push({
           type: 'raise', amount: target, ev: ev,
           tag: eqCalled >= 0.55 ? 'value' : 'bluff',
-          fe: pFoldAll, eqCalled: eqCalled
+          fe: pFoldAll, eqCalled: eqCalled, cost: myCost
         });
       });
     }
 
     candidates.sort(function (x, y) { return y.ev - x.ev; });
+    return {
+      candidates: candidates, equity: eq, topPct: topPct, ranges: ranges,
+      dist: dist, inPosition: inPos, realization: rz,
+      potOdds: toCall > 0 ? toCall / (pot + toCall) : 0
+    };
+  }
+
+  function postflop(ctx) {
+    const game = ctx.game, a = ctx.a, prof = ctx.prof, diff = ctx.diff, rand = ctx.rand;
+    const o = evaluateOptions(ctx);
+    const candidates = o.candidates;
+
+    ctx.think.equity = o.equity;
+    ctx.think.topPct = o.topPct;
+    ctx.think.rangeHi = o.ranges[0] ? o.ranges[0].band.hi : 1;
+    ctx.think.potOdds = o.potOdds;
+    ctx.think.inPosition = o.inPosition;
 
     /* 트래퍼: 아주 강할 때 가끔 체크로 함정 */
-    if (a.canCheck && topPct <= 0.06 && rand() < prof.slowplay) {
+    if (a.canCheck && o.topPct != null && o.topPct <= 0.06 && rand() < prof.slowplay) {
       ctx.think.plan = 'slowplay';
       return { type: 'check' };
     }
@@ -421,15 +439,14 @@
   }
 
   /* ---------- 진입점 ---------- */
-  function decide(game, player, opts) {
+  function makeContext(game, player, opts) {
     opts = opts || {};
     const diff = DIFFICULTY[opts.difficulty] || DIFFICULTY.normal;
-    const prof = player.profile || PROFILES[1];
+    const prof = opts.profile || player.profile || PROFILES[1];
     const rand = opts.rng || game.rng || Math.random;
     const a = game.actionsFor(player);
     const opponents = game.activePlayers().filter(function (p) { return p !== player; });
-
-    if (!opponents.length) return { type: a.canCheck ? 'check' : 'call', think: {} };
+    if (!opponents.length) return null;
 
     const ctx = {
       game: game, player: player, opts: opts, diff: diff, prof: prof, rand: rand,
@@ -439,6 +456,27 @@
       think: { difficulty: diff.key, profile: prof.key }
     };
     ctx.think.pos = ctx.pos;
+    return ctx;
+  }
+
+  /** 리뷰/힌트용: 선택지별 EV 를 그대로 돌려준다 */
+  function analyze(game, player, opts) {
+    const ctx = makeContext(game, player, opts);
+    if (!ctx) return null;
+    const o = evaluateOptions(ctx);
+    o.context = ctx;
+    o.position = ctx.pos;
+    o.handPct = R.percentile(R.classOf(player.cards[0], player.cards[1]));
+    return o;
+  }
+
+  function decide(game, player, opts) {
+    const ctx = makeContext(game, player, opts);
+    if (!ctx) {
+      const a0 = game.actionsFor(player);
+      return { type: a0.canCheck ? 'check' : 'call', think: {} };
+    }
+    const a = ctx.a, diff = ctx.diff;
 
     let d = game.street === 'preflop' ? preflop(ctx) : postflop(ctx);
     d = applyMistakes(ctx, d);
@@ -469,6 +507,9 @@
     NAMES: NAMES,
     DIFFICULTY: DIFFICULTY,
     decide: decide,
+    analyze: analyze,
+    evaluateOptions: evaluateOptions,
+    makeContext: makeContext,
     equity: equity,
     inferRange: inferRange,
     pushRange: pushRange

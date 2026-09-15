@@ -8,6 +8,8 @@ require('../js/ranges.js');
 require('../js/equity.js');
 require('../js/stats.js');
 require('../js/tournament.js');
+require('../js/review.js');
+require('../js/history.js');
 require('../js/i18n.js');
 const C = H.cards;
 
@@ -967,6 +969,169 @@ test('언어를 바꾸면 과거 로그도 함께 바뀐다', function () {
   H.i18n.setLang('en');
   assert(foldEntry.text.indexOf('folds') >= 0, '영어: ' + foldEntry.text);
   H.i18n.setLang('ko');
+});
+
+console.log('\n[핸드 리뷰]');
+function reviewSetup() {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(101) });
+  for (let i = 0; i < 4; i++) {
+    g.addPlayer({ id: i, name: 'P' + i, chips: 2000, isHuman: i === 0, profile: H.ai.PROFILES[1] });
+  }
+  g.startHand();
+  let guard = 0;
+  while (g.phase === 'awaiting-action' && !g.currentActor().isHuman && guard++ < 10) {
+    g.act(g.currentActor().id, H.ai.decide(g, g.currentActor()));
+  }
+  return g;
+}
+test('72o 는 폴드가 정답, 콜은 EV 손실', function () {
+  const g = reviewSetup();
+  const hero = g.currentActor();
+  hero.cards = '7d 2c'.split(' ').map(C.parseCard);
+  const folded = H.review.evaluate(g, hero, { type: 'fold' }, { difficulty: 'hard' });
+  eq(folded.best.type, 'fold', '기준선이 폴드여야 한다');
+  eq(folded.verdict, 'good');
+  eq(folded.evLoss, 0);
+  const called = H.review.evaluate(g, hero, { type: 'call' }, { difficulty: 'hard' });
+  assert(called.evLoss > 0, '콜에는 EV 손실이 있어야 한다');
+});
+test('AA 를 접으면 실수로 판정된다', function () {
+  const g = reviewSetup();
+  const hero = g.currentActor();
+  hero.cards = 'As Ad'.split(' ').map(C.parseCard);
+  const r = H.review.evaluate(g, hero, { type: 'fold' }, { difficulty: 'hard' });
+  eq(r.best.type, 'raise', 'AA 는 레이즈가 정답');
+  assert(r.verdict === 'mistake' || r.verdict === 'blunder', '판정: ' + r.verdict);
+  assert(r.evLoss > g.bigBlind, 'EV 손실이 1bb 를 넘어야 한다 (' + r.evLoss.toFixed(1) + ')');
+});
+test('리뷰 기준선은 블러프 최대 EV 가 아니다', function () {
+  // 원시 EV 만 쓰면 폴드 에쿼티 때문에 72o 레이즈가 "정답"으로 나온다
+  const g = reviewSetup();
+  const hero = g.currentActor();
+  hero.cards = '7d 2c'.split(' ').map(C.parseCard);
+  const r = H.review.evaluate(g, hero, { type: 'fold' }, { difficulty: 'hard' });
+  assert(r.best.type !== 'raise', '72o 로 레이즈를 추천하면 안 된다');
+  const rawBest = r.candidates[0];
+  assert(rawBest.type === 'raise' || rawBest.ev >= 0, '원시 EV 최대값은 별도로 남아 있어야 한다');
+});
+test('리뷰는 같은 상황에서 같은 결과를 낸다', function () {
+  const g = reviewSetup();
+  const hero = g.currentActor();
+  hero.cards = 'Kh Qh'.split(' ').map(C.parseCard);
+  const a = H.review.evaluate(g, hero, { type: 'call' }, { difficulty: 'hard' });
+  const b = H.review.evaluate(g, hero, { type: 'call' }, { difficulty: 'hard' });
+  eq(a.best.type, b.best.type, '기준선이 흔들리면 안 된다');
+});
+test('요약', function () {
+  const g = reviewSetup();
+  const hero = g.currentActor();
+  hero.cards = 'As Ad'.split(' ').map(C.parseCard);
+  const bad = H.review.evaluate(g, hero, { type: 'fold' }, { difficulty: 'hard' });
+  const good = H.review.evaluate(g, hero, { type: 'raise', amount: 60 }, { difficulty: 'hard' });
+  const sum = H.review.summarize([bad, good], 20);
+  assert(sum.total > 0);
+  assert(sum.worst === bad, '가장 큰 손실이 지목되어야 한다');
+  const clean = H.review.summarize([good], 20);
+  eq(clean.total, 0);
+  assert(clean.text.indexOf('없이') >= 0 || clean.text.indexOf('without') >= 0, clean.text);
+});
+test('EV 손실 구간별 판정', function () {
+  eq(H.review.classify(0.05).verdict, 'good');
+  eq(H.review.classify(0.4).verdict, 'ok');
+  eq(H.review.classify(1.5).verdict, 'mistake');
+  eq(H.review.classify(10).verdict, 'blunder');
+});
+
+console.log('\n[핸드 히스토리 / 리플레이]');
+function playHands(n, seed) {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(seed || 55) });
+  for (let i = 0; i < 4; i++) g.addPlayer({ id: i, name: 'P' + i, chips: 3000, profile: H.ai.PROFILES[i % 5] });
+  const rec = H.history.create();
+  for (let h = 0; h < n; h++) {
+    g.startHand();
+    if (g.phase === 'game-over') break;
+    let guard = 0;
+    while (g.phase !== 'hand-over' && g.phase !== 'game-over' && guard++ < 300) {
+      if (g.phase === 'awaiting-action') g.act(g.currentActor().id, H.ai.decide(g, g.currentActor()));
+      else if (g.phase === 'need-street') g.dealNextStreet();
+      else if (g.phase === 'showdown') g.resolveShowdown();
+    }
+    rec.record(g);
+  }
+  return { g: g, rec: rec };
+}
+test('핸드가 빠짐없이 기록된다', function () {
+  const r = playHands(8);
+  eq(r.rec.length(), 8);
+  let prevSeats = 5;
+  r.rec.hands.forEach(function (h, i) {
+    eq(h.no, i + 1);
+    assert(h.seats.length >= 2 && h.seats.length <= prevSeats,
+      '좌석 수는 줄어들기만 해야 한다 (' + prevSeats + ' -> ' + h.seats.length + ')');
+    prevSeats = h.seats.length;
+    assert(h.actions.length > 0, '핸드 ' + h.no + ' 에 액션이 없다');
+    assert(h.results, '결과가 없다');
+  });
+});
+test('리플레이 스텝의 팟이 단조 증가한다', function () {
+  const r = playHands(10);
+  r.rec.hands.forEach(function (h) {
+    const steps = H.history.buildReplay(h);
+    assert(steps.length >= 2, '스텝이 너무 적다');
+    eq(steps[0].kind, 'start');
+    for (let i = 1; i < steps.length; i++) {
+      assert(steps[i].pot >= steps[i - 1].pot - 0.001,
+        '핸드 ' + h.no + ' 스텝 ' + i + ': 팟이 줄었다 ' + steps[i - 1].pot + ' -> ' + steps[i].pot);
+    }
+    const last = steps[steps.length - 1];
+    if (h.results) eq(last.kind, 'result');
+  });
+});
+test('리플레이의 보드 카드 수가 스트리트와 맞는다', function () {
+  const r = playHands(12);
+  const counts = { preflop: 0, flop: 3, turn: 4, river: 5 };
+  r.rec.hands.forEach(function (h) {
+    H.history.buildReplay(h).forEach(function (s) {
+      if (s.kind === 'result') return;
+      eq(s.community.length, counts[s.street], '핸드 ' + h.no + ' ' + s.street);
+    });
+  });
+});
+test('최종 팟이 실제 팟과 일치한다', function () {
+  const r = playHands(12);
+  r.rec.hands.forEach(function (h) {
+    const steps = H.history.buildReplay(h);
+    const lastAction = steps.filter(function (s) { return s.kind !== 'result'; }).pop();
+    eq(lastAction.pot, h.pot, '핸드 ' + h.no);
+  });
+});
+test('텍스트 내보내기', function () {
+  const r = playHands(3);
+  const txt = H.history.toText(r.rec.hands[0]);
+  assert(txt.indexOf('핸드 #1') >= 0, txt.slice(0, 40));
+  assert(txt.indexOf('[D]') >= 0, '딜러 버튼 표시');
+  assert(txt.indexOf('프리플랍') >= 0);
+  const all = r.rec.exportAll();
+  assert(all.split('===').length - 1 >= 3, '핸드 3개가 모두 들어가야 한다');
+});
+test('머크한 카드는 기록에 남되 텍스트에서는 가려진다', function () {
+  const r = playHands(20);
+  const muckedHand = r.rec.hands.filter(function (h) {
+    return h.seats.some(function (s) { return s.mucked && !s.isHuman && s.cards.length; });
+  })[0];
+  if (!muckedHand) return;   // 20핸드 안에 없으면 통과
+  const seat = muckedHand.seats.filter(function (s) { return s.mucked && !s.isHuman; })[0];
+  eq(seat.cards.length, 2, '기록에는 남아 있어야 리플레이가 가능하다');
+  const txt = H.history.toText(muckedHand);
+  const line = txt.split('\n').filter(function (l) { return l.indexOf(seat.name) === 0 || l.indexOf('  ' + seat.name) >= 0; })[0];
+  assert(txt.indexOf('??') >= 0, '텍스트에서는 가려져야 한다');
+});
+test('JSON 왕복', function () {
+  const r = playHands(4);
+  const restored = H.history.Recorder.fromJSON(JSON.parse(JSON.stringify(r.rec.toJSON())));
+  eq(restored.length(), 4);
+  eq(restored.get(0).no, 1);
+  eq(H.history.buildReplay(restored.get(0)).length, H.history.buildReplay(r.rec.get(0)).length);
 });
 
 console.log('\n결과: ' + passed + ' 통과, ' + failed + ' 실패\n');

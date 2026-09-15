@@ -227,6 +227,7 @@
     'hist.next': ['다음', 'Next'],
     'hist.close': ['닫기', 'Close'],
     'hist.export': ['내보내기', 'Export'],
+    'hist.winner': ['결과', 'Result'],
 
     /* --- 프리플랍 차트 --- */
     'chart.title': ['프리플랍 오픈 레인지', 'Preflop opening ranges'],
