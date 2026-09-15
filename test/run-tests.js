@@ -1133,5 +1133,46 @@ test('JSON 왕복', function () {
   eq(H.history.buildReplay(restored.get(0)).length, H.history.buildReplay(r.rec.get(0)).length);
 });
 
+console.log('\n[애드온]');
+test('애드온은 리바이 마지막 레벨에 한 번만', function () {
+  const g = new H.Game({
+    smallBlind: 10, bigBlind: 20, allowRebuy: true,
+    rebuyChips: 1000, addonChips: 1500, rebuyUntilLevel: 3, levelEvery: 1
+  });
+  g.addPlayer({ id: 0, name: 'A', chips: 500, isHuman: true });
+  g.addPlayer({ id: 1, name: 'B', chips: 1000 });
+  eq(g.canAddon(g.players[0]), false, '초반 레벨에는 불가');
+  g.levelIndex = 2;
+  eq(g.canAddon(g.players[0]), true, '리바이 마지막 레벨에는 가능');
+  eq(g.addon(0), true);
+  eq(g.players[0].chips, 2000);
+  eq(g.addon(0), false, '두 번은 불가');
+  eq(g.canAddon(g.players[0]), false);
+});
+test('칩이 없으면 애드온이 아니라 리바이 대상', function () {
+  const g = new H.Game({
+    smallBlind: 10, bigBlind: 20, allowRebuy: true,
+    rebuyChips: 1000, addonChips: 1500, rebuyUntilLevel: 3
+  });
+  g.addPlayer({ id: 0, name: 'A', chips: 0, isHuman: true });
+  g.addPlayer({ id: 1, name: 'B', chips: 1000 });
+  g.levelIndex = 2;
+  eq(g.canAddon(g.players[0]), false);
+  eq(g.canRebuy(g.players[0]), true);
+});
+test('애드온 상태가 저장/복원된다', function () {
+  const g = new H.Game({
+    smallBlind: 10, bigBlind: 20, seed: 5, rng: H.rng.create(5),
+    allowRebuy: true, rebuyChips: 1000, addonChips: 1500, rebuyUntilLevel: 3
+  });
+  g.addPlayer({ id: 0, name: 'A', chips: 800, isHuman: true });
+  g.addPlayer({ id: 1, name: 'B', chips: 1000 });
+  g.levelIndex = 2;
+  g.addon(0);
+  const g2 = H.Game.fromJSON(JSON.parse(JSON.stringify(g.toJSON())));
+  eq(g2.addonChips, 1500);
+  eq(g2.canAddon(g2.players[0]), false, '이미 받았다는 사실이 유지되어야 한다');
+});
+
 console.log('\n결과: ' + passed + ' 통과, ' + failed + ' 실패\n');
 process.exit(failed ? 1 : 0);

@@ -48,6 +48,7 @@
 
   <section class="controls">
     <div class="hero-readout" id="heroReadout"></div>
+    <div class="street-summary" id="streetSummary" aria-live="polite"></div>
 
     <div class="action-area">
       <div class="btn-row" id="btnRow">
@@ -73,6 +74,10 @@
       </div>
 
       <div class="waiting" id="waiting" aria-live="polite"></div>
+      <div class="btn-row" id="addonRow">
+        <button class="act gold" id="btnAddon" data-i18n="tour.addonPlain">애드온</button>
+        <button class="act" id="btnAddonSkip" data-i18n="common.no">아니오</button>
+      </div>
       <div class="btn-row" id="nextRow">
         <button class="act ghost-btn" id="btnReview" data-i18n="review.title">핸드 리뷰</button>
         <button class="act next" id="btnNext"><span data-i18n="ctl.nextHand">다음 핸드</span><kbd>Space</kbd></button>

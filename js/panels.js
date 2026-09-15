@@ -48,11 +48,35 @@
     { key: 'wsd', label: 'stats.wsd', hint: 'stats.wsdHint', fmt: pct }
   ];
 
+  /* ICM 지분: 상금 자리보다 사람이 많이 남아 있을 때만 의미가 있다.
+     핸드 기록과 무관한 정보라 통계 표보다 먼저 그린다. */
+  function renderIcm(game, host, heroId) {
+    if (!game || game.players.length <= 2 || !H.tournament) return;
+    const payouts = game.payouts();
+    if (payouts.length <= 1 || payouts.length >= game.players.length) return;
+    const icm = game.icm();
+    const pressure = H.tournament.icmPressure(
+      game.players.map(function (p) { return p.chips; }), payouts);
+    host.appendChild(el('h4', 'panel-sub', T('tour.icm')));
+    const icmList = el('div', 'icm-list');
+    game.players.forEach(function (p, i) {
+      const row = el('div', 'icm-row' + (p.id === heroId ? ' hero' : ''));
+      row.appendChild(el('span', 'icm-name', p.name));
+      row.appendChild(el('span', 'icm-val', num(icm[i])));
+      const pr = el('span', 'icm-pressure' + (pressure[i] < 1 ? ' down' : ' up'),
+        (pressure[i] >= 1 ? '+' : '') + ((pressure[i] - 1) * 100).toFixed(0) + '%');
+      row.appendChild(pr);
+      icmList.appendChild(row);
+    });
+    host.appendChild(icmList);
+  }
+
   H.panels.renderStats = function (tracker, game, host, heroId) {
     host.innerHTML = '';
     const rows = tracker.all().filter(function (s) { return s.hands > 0; });
     if (!rows.length) {
       host.appendChild(el('p', 'empty', T('stats.empty')));
+      renderIcm(game, host, heroId);
       return;
     }
 
@@ -93,6 +117,8 @@
     const scroller = el('div', 'stats-wrap');
     scroller.appendChild(table);
     host.appendChild(scroller);
+
+    renderIcm(game, host, heroId);
 
     host.appendChild(el('h4', 'panel-sub', T('stats.chipGraph')));
     const d = tracker.data[heroId];

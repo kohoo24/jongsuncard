@@ -278,6 +278,10 @@
     'tour.remaining': ['남은 인원 {n}명', '{n} players left'],
     'tour.rebuyPrompt': ['칩을 모두 잃었습니다. 리바이하시겠습니까?', 'You are out of chips. Rebuy?'],
     'tour.addonPrompt': ['애드온을 받으시겠습니까?', 'Take the add-on?'],
+    'tour.addonPlain': ['애드온', 'Add-on'],
+    'tour.addon': ['애드온 ({amount})', 'Add-on ({amount})'],
+    'summary.title': ['이번 핸드', 'This hand'],
+    'summary.none': ['아직 액션이 없습니다', 'No action yet'],
     'tour.icm': ['ICM 지분', 'ICM equity'],
 
     /* --- 기타 --- */

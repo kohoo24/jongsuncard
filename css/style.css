@@ -481,6 +481,24 @@ button.ghost[aria-pressed="false"] { opacity: .45; }
 .readout.odds, .readout.muted { color: var(--muted); }
 .readout.outs { color: #9fd4ff; }
 
+.street-summary {
+  display: flex; justify-content: center; gap: 12px;
+  flex-wrap: wrap; font-size: 11.5px; color: var(--muted);
+  min-height: 16px; margin-bottom: 7px;
+}
+.sum-seg b { color: rgba(255, 255, 255, .55); font-weight: 600; margin-right: 3px; }
+.sum-seg.now { color: var(--text); }
+.sum-seg.now b { color: var(--gold); }
+
+.icm-list { display: flex; flex-direction: column; gap: 3px; }
+.icm-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.icm-row.hero { color: var(--gold); font-weight: 600; }
+.icm-name { flex: 1; }
+.icm-val { color: var(--text); }
+.icm-pressure { min-width: 42px; text-align: right; font-size: 10.5px; }
+.icm-pressure.up { color: var(--green); }
+.icm-pressure.down { color: #ff9b8a; }
+
 .action-area { max-width: 760px; margin: 0 auto; }
 .btn-row { display: flex; gap: 8px; }
 .btn-row + .btn-row { margin-top: 8px; }
@@ -600,6 +618,7 @@ kbd {
   .modal-box { padding: 18px; }
 }
 @media (max-height: 640px) and (orientation: landscape) {
+  .street-summary { display: none; }
   .seat .cards { min-height: 0; margin-bottom: 3px; }
   .controls { padding: 5px 12px 8px; }
   .hero-readout { margin-bottom: 5px; min-height: 0; }

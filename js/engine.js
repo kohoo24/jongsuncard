@@ -70,6 +70,8 @@
     this.allowRebuy = !!opts.allowRebuy;
     this.rebuyChips = opts.rebuyChips || 0;
     this.rebuyUntilLevel = opts.rebuyUntilLevel || 4;
+    this.addonChips = opts.addonChips || 0;      // 리바이 기간이 끝날 때 한 번 받을 수 있다
+    this.addonTaken = {};
     this.finished = [];                          // 탈락 기록 [{id, name, place}]
     this.startingField = 0;
 
@@ -181,8 +183,8 @@
 
   /* ---------- 토너먼트 ---------- */
   Game.prototype.payouts = function () {
-    const totalChips = this.players.reduce(function (s, p) { return s + p.chips; }, 0)
-      + this.finished.reduce(function (s) { return s; }, 0);
+    // 탈락자의 칩은 이미 남은 플레이어들에게 넘어가 있으므로 현재 스택 합이 곧 총 칩이다
+    const totalChips = this.players.reduce(function (s, p) { return s + p.chips; }, 0);
     const struct = H.tournament.payoutStructure(this.startingField);
     return struct.map(function (f) { return Math.round(f * totalChips); });
   };
@@ -206,6 +208,25 @@
     p.rebuys++;
     this.say('log.rebuy', { name: p.name, amount: this.rebuyChips }, 'blind');
     this.emit('rebuy', { player: p });
+    return true;
+  };
+
+  /* 애드온: 리바이 기간이 끝나는 레벨에 딱 한 번, 칩이 남아 있어도 받을 수 있다 */
+  Game.prototype.canAddon = function (player) {
+    return this.allowRebuy
+      && this.addonChips > 0
+      && !this.addonTaken[player.id]
+      && this.levelIndex === this.rebuyUntilLevel - 1
+      && player.chips > 0;
+  };
+
+  Game.prototype.addon = function (playerId) {
+    const p = this.byId(playerId);
+    if (!p || !this.canAddon(p)) return false;
+    p.chips += this.addonChips;
+    this.addonTaken[p.id] = true;
+    this.say('log.addon', { name: p.name, amount: this.addonChips }, 'blind');
+    this.emit('addon', { player: p });
     return true;
   };
 
@@ -750,6 +771,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       allowRebuy: this.allowRebuy,
       rebuyChips: this.rebuyChips,
       rebuyUntilLevel: this.rebuyUntilLevel,
+      addonChips: this.addonChips,
+      addonTaken: this.addonTaken,
       actionClock: this.actionClock,
       timeBank: this.timeBank,
       alwaysShow: this.alwaysShow,
@@ -799,11 +822,12 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
     const g = new Game({
       rng: rng, seed: obj.seed, levels: obj.levels, levelEvery: obj.levelEvery,
       anteMode: obj.anteMode, allowRebuy: obj.allowRebuy, rebuyChips: obj.rebuyChips,
-      rebuyUntilLevel: obj.rebuyUntilLevel, actionClock: obj.actionClock,
+      rebuyUntilLevel: obj.rebuyUntilLevel, addonChips: obj.addonChips, actionClock: obj.actionClock,
       timeBank: obj.timeBank, alwaysShow: obj.alwaysShow, askShowChoice: obj.askShowChoice,
       onEvent: opts.onEvent
     });
     g.levelIndex = obj.levelIndex || 0;
+    g.addonTaken = obj.addonTaken || {};
     g.smallBlind = obj.smallBlind;
     g.bigBlind = obj.bigBlind;
     g.ante = obj.ante || 0;

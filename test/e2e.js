@@ -25,6 +25,28 @@ function check(name, cond, detail) {
   else { failed++; console.log('  ✗ ' + name + (detail ? '\n      ' + detail : '')); }
 }
 
+/* 자동 리뷰 모달은 핸드가 끝난 뒤 언제든 뜰 수 있으므로, 클릭 전에 치워 준다 */
+async function dismissModals(page) {
+  for (let i = 0; i < 4; i++) {
+    const open = await page.evaluate(function () {
+      const m = document.querySelector('.modal.show');
+      return m ? m.id : null;
+    });
+    if (!open || open === 'setupModal' || open === 'overModal') return open;
+    if (open === 'reviewModal') await page.click('#btnReviewClose');
+    else if (open === 'replayModal') await page.click('#btnReplayClose');
+    else return open;
+    await page.waitForTimeout(150);
+  }
+  return null;
+}
+
+/* 모달을 치운 뒤 클릭한다 */
+async function safeClick(page, selector) {
+  await dismissModals(page);
+  await page.click(selector);
+}
+
 function collectErrors(page, sink) {
   page.on('pageerror', function (e) { sink.push('pageerror: ' + e.message); });
   page.on('console', function (m) { if (m.type() === 'error') sink.push('console: ' + m.text()); });
@@ -107,7 +129,7 @@ async function playHands(page, target, opts) {
   check('가로 스크롤이 생기지 않는다', noScroll);
 
   console.log('\n[패널]');
-  await page.click('.tab[data-tab="stats"]');
+  await safeClick(page, '.tab[data-tab="stats"]');
   await page.waitForTimeout(400);
   const stats = await page.evaluate(function () {
     return {
@@ -120,6 +142,7 @@ async function playHands(page, target, opts) {
   check('칩 추이 차트가 그려진다', stats.chart);
   check('시리즈가 2개 이상이면 범례가 있다', stats.legend >= 2, '범례 ' + stats.legend);
 
+  await dismissModals(page);
   const box = await page.locator('.chip-chart').boundingBox();
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.5);
   await page.waitForTimeout(200);
@@ -129,7 +152,7 @@ async function playHands(page, target, opts) {
   });
   check('차트 호버 툴팁이 뜬다', tipShown);
 
-  await page.click('.tab[data-tab="chart"]');
+  await safeClick(page, '.tab[data-tab="chart"]');
   await page.waitForTimeout(300);
   const chart = await page.evaluate(function () {
     return {
@@ -143,7 +166,7 @@ async function playHands(page, target, opts) {
   check('포지션 버튼 6개', chart.buttons === 6);
 
   async function rangeSizeAt(index) {
-    await page.click('.pos-btn:nth-child(' + index + ')');
+    await safeClick(page, '.pos-btn:nth-child(' + index + ')');
     await page.waitForTimeout(220);
     return page.evaluate(function () { return document.querySelectorAll('.range-cell.in').length; });
   }
@@ -156,12 +179,12 @@ async function playHands(page, target, opts) {
     }));
 
   console.log('\n[핸드 히스토리와 리플레이]');
-  await page.click('.tab[data-tab="hist"]');
+  await safeClick(page, '.tab[data-tab="hist"]');
   await page.waitForTimeout(300);
   const histRows = await page.evaluate(function () { return document.querySelectorAll('.hist-row').length; });
   check('히스토리에 핸드가 쌓인다', histRows >= 5, '행 ' + histRows);
 
-  await page.click('.hist-row');
+  await safeClick(page, '.hist-row');
   await page.waitForTimeout(300);
   const replay1 = await page.evaluate(function () {
     return document.querySelector('.replay-pos').textContent.trim();
@@ -176,7 +199,7 @@ async function playHands(page, target, opts) {
 
   console.log('\n[핸드 리뷰]');
   /* 리뷰 버튼은 핸드가 끝났을 때만 보인다 */
-  await page.click('.tab[data-tab="log"]');
+  await safeClick(page, '.tab[data-tab="log"]');
   for (let i = 0; i < 40; i++) {
     const vis = await page.evaluate(function () {
       const b = document.getElementById('btnReview');
@@ -236,7 +259,7 @@ async function playHands(page, target, opts) {
   }
 
   console.log('\n[언어 전환]');
-  await page.click('#btnMenu');
+  await safeClick(page, '#btnMenu');
   await page.waitForSelector('#setupModal.show');
   await page.selectOption('#optLang', 'en');
   await page.waitForTimeout(200);

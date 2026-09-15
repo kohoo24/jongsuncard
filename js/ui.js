@@ -346,6 +346,34 @@
       host.appendChild(chip('outs', state.drawInfo.labels[0]));
     }
   }
+  /* 스트리트별 내 액션 요약 — "프리플랍 콜 20 · 플랍 체크, 콜 40" */
+  function updateStreetSummary() {
+    const g = state.game;
+    const host = $('streetSummary');
+    const acts = g.actionsOf(HERO_ID);
+    if (!acts.length) { host.textContent = ''; return; }
+    const byStreet = {};
+    const order = [];
+    acts.forEach(function (a) {
+      if (!byStreet[a.street]) { byStreet[a.street] = []; order.push(a.street); }
+      const label = a.type === 'raise'
+        ? T(a.currentBetBefore === 0 ? 'act.bet' : 'act.raise') + ' ' + num(a.amount)
+        : a.type === 'call' ? T('act.call') + ' ' + num(a.paid)
+          : T('act.' + a.type);
+      byStreet[a.street].push(label);
+    });
+    host.innerHTML = '';
+    order.forEach(function (st) {
+      const seg = document.createElement('span');
+      seg.className = 'sum-seg' + (st === g.street ? ' now' : '');
+      const name = document.createElement('b');
+      name.textContent = T('street.' + st);
+      seg.appendChild(name);
+      seg.appendChild(document.createTextNode(' ' + byStreet[st].join(', ')));
+      host.appendChild(seg);
+    });
+  }
+
   function chip(cls, text) {
     const s = document.createElement('span');
     s.className = 'readout ' + cls;
@@ -366,6 +394,9 @@
     hide($('btnRow'), !isHeroTurn);
     hide($('raiseRow'), !isHeroTurn);
     hide($('showRow'), !showChoice);
+    const canAddon = handOver && hero && g.canAddon(hero);
+    hide($('addonRow'), !canAddon);
+    if (canAddon) $('btnAddon').textContent = T('tour.addon', { amount: num(g.addonChips) });
     hide($('nextRow'), !handOver);
     hide($('waiting'), isHeroTurn || handOver || showChoice);
     hide($('btnReview'), !state.lastSummary || !state.lastSummary.items.length);
@@ -520,6 +551,7 @@
     updateSeats();
     updateBoard();
     updateHeroReadout();
+    updateStreetSummary();
     updateControls();
     refreshPanel();
   }
@@ -876,7 +908,9 @@
       rng: rng, seed: seed, levels: levels, levelEvery: s.structure,
       smallBlind: s.blind, bigBlind: s.blind * 2, anteMode: s.anteMode,
       actionClock: s.actionClock, timeBank: s.actionClock ? 15 : 0,
-      allowRebuy: s.allowRebuy, rebuyChips: s.allowRebuy ? s.chips : 0,
+      allowRebuy: s.allowRebuy,
+      rebuyChips: s.allowRebuy ? s.chips : 0,
+      addonChips: s.allowRebuy ? Math.round(s.chips * 1.5) : 0,
       askShowChoice: true
     });
     if (!s.structure) { g.smallBlind = s.blind; g.bigBlind = s.blind * 2; g.ante = 0; }
@@ -1001,6 +1035,15 @@
     });
     $('raiseSlider').addEventListener('input', updateRaiseLabel);
     $('btnNext').addEventListener('click', nextHand);
+    $('btnAddon').addEventListener('click', function () {
+      state.game.addon(HERO_ID);
+      SFX.chip();
+      render();
+    });
+    $('btnAddonSkip').addEventListener('click', function () {
+      state.game.addonTaken[HERO_ID] = true;
+      render();
+    });
     $('btnReview').addEventListener('click', openReview);
     $('btnReviewClose').addEventListener('click', function () { closeModal('reviewModal'); });
     $('btnReplayClose').addEventListener('click', function () { closeModal('replayModal'); });
