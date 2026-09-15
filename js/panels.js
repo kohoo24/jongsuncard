@@ -22,6 +22,18 @@
     });
   }
   function pct(v) { return Math.round(v * 100) + '%'; }
+
+  /* 목록용 작은 카드 표기 — 무늬는 SVG 로 그린다 */
+  function miniCard(c) {
+    const m = el('span', 'mini-card');
+    m.dataset.suit = c.suit;
+    m.appendChild(document.createTextNode(H.cards.RANK_LABEL[c.rank]));
+    const icon = H.cardart.suitIcon(c.suit, 8, H.cardart.inkOf(c.suit, false));
+    icon.style.marginLeft = '2px';
+    icon.style.verticalAlign = '-1px';
+    m.appendChild(icon);
+    return m;
+  }
   function num(v) { return Math.round(v).toLocaleString(); }
 
   H.panels = { SERIES: SERIES };
@@ -108,8 +120,11 @@
       tr.appendChild(nameCell);
       tr.appendChild(el('td', null, String(s.hands)));
       STAT_COLS.forEach(function (c) { tr.appendChild(el('td', null, c.fmt(s[c.key]))); });
-      const bb = el('td', s.bb100 >= 0 ? 'pos' : 'neg',
-        (s.bb100 >= 0 ? '+' : '') + s.bb100.toFixed(1));
+      /* 핸드 수가 적으면 bb/100 이 수천까지 나온다 — 자릿수를 줄여 열이 붙지 않게 */
+      const v = s.bb100;
+      const txt = Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : v.toFixed(1);
+      const bb = el('td', v >= 0 ? 'pos' : 'neg', (v >= 0 ? '+' : '') + txt);
+      bb.title = v.toFixed(1) + ' bb/100';
       tr.appendChild(bb);
       tbody.appendChild(tr);
     });
@@ -317,11 +332,7 @@
 
       const board = el('div', 'hist-board');
       if (hand.community.length) {
-        hand.community.forEach(function (c) {
-          const mini = el('span', 'mini-card' + (H.cards.isRed(c) ? ' red' : ''));
-          mini.textContent = H.cards.RANK_LABEL[c.rank] + H.cards.SUIT_LABEL[c.suit];
-          board.appendChild(mini);
-        });
+        hand.community.forEach(function (c) { board.appendChild(miniCard(c)); });
       } else {
         board.appendChild(el('span', 'muted', T('street.preflop')));
       }
@@ -330,11 +341,7 @@
       const seat = hand.seats.filter(function (s) { return s.id === heroId; })[0];
       if (seat && seat.cards.length) {
         const mine = el('div', 'hist-mine');
-        seat.cards.forEach(function (c) {
-          const mini = el('span', 'mini-card' + (H.cards.isRed(c) ? ' red' : ''));
-          mini.textContent = H.cards.RANK_LABEL[c.rank] + H.cards.SUIT_LABEL[c.suit];
-          mine.appendChild(mini);
-        });
+        seat.cards.forEach(function (c) { mine.appendChild(miniCard(c)); });
         mine.appendChild(el('span', 'muted', seat.position));
         row.appendChild(mine);
       }
@@ -472,10 +479,9 @@
         board.appendChild(el('span', 'replay-preflop', T('street.preflop')));
       } else {
         s.community.forEach(function (c) {
-          const card = el('div', 'card small' + (H.cards.isRed(c) ? ' red' : ''));
+          const card = el('div', 'card small');
           card.dataset.suit = c.suit;
-          card.appendChild(el('div', 'r', H.cards.RANK_LABEL[c.rank]));
-          card.appendChild(el('div', 's', H.cards.SUIT_LABEL[c.suit]));
+          card.appendChild(H.cardart.face(c, { compact: true }));
           board.appendChild(card);
         });
       }

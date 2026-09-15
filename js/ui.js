@@ -97,24 +97,27 @@
     opts = opts || {};
     const e = document.createElement('div');
     e.className = 'card' + (opts.small ? ' small' : '');
-    if (!card) { e.classList.add('back'); e.setAttribute('aria-label', '뒷면'); return e; }
+    if (!card) {
+      e.appendChild(H.cardart.back());
+      e.setAttribute('aria-label', T('card.back'));
+      return e;
+    }
     e.dataset.suit = card.suit;
-    if (H.cards.isRed(card)) e.classList.add('red');
-    const r = document.createElement('div');
-    r.className = 'r';
-    r.textContent = H.cards.RANK_LABEL[card.rank];
-    const s = document.createElement('div');
-    s.className = 's';
-    s.textContent = H.cards.SUIT_LABEL[card.suit];
-    e.appendChild(r); e.appendChild(s);
+    e.appendChild(H.cardart.face(card, {
+      compact: !!opts.small,
+      fourColor: !!(state.settings && state.settings.fourColor)
+    }));
     e.setAttribute('role', 'listitem');
-    e.setAttribute('aria-label', H.cards.RANK_LABEL[card.rank] + ' ' + H.cards.SUIT_LABEL[card.suit]);
+    e.setAttribute('aria-label',
+      H.cards.RANK_LABEL[card.rank] + ' ' + T('suit.' + card.suit));
     return e;
   }
+
   function cardKey(c) { return c ? H.cards.cardToString(c) : ''; }
   function sig(cards, hidden) {
     if (!cards.length) return 'none';
-    return (hidden ? 'back:' : '') + cards.map(cardKey).join(',');
+    const fc = (state.settings && state.settings.fourColor) ? '4' : '2';
+    return (hidden ? 'back:' : fc + ':') + cards.map(cardKey).join(',');
   }
   function esc(s) {
     return String(s).replace(/[&<>"']/g, function (m) {
@@ -218,8 +221,21 @@
       e.root.classList.toggle('winner', g.phase === 'hand-over' && p.won > 0);
       if (!isTurn) e.ring.style.background = '';
 
-      if (p.bet > 0) { e.bet.textContent = num(p.bet); e.bet.classList.remove('hidden'); }
-      else e.bet.classList.add('hidden');
+      if (p.bet > 0) {
+        const bsig = 'b' + p.bet;
+        if (e.betSig !== bsig) {
+          e.betSig = bsig;
+          e.bet.innerHTML = '';
+          e.bet.appendChild(H.cardart.chipStack(p.bet, { size: 20 }));
+          const amt = document.createElement('span');
+          amt.textContent = num(p.bet);
+          e.bet.appendChild(amt);
+        }
+        e.bet.classList.remove('hidden');
+      } else {
+        e.bet.classList.add('hidden');
+        e.betSig = '';
+      }
 
       e.badge.classList.toggle('hidden', g.players.indexOf(p) !== g.button);
 
@@ -308,20 +324,24 @@
 
     $('streetLabel').textContent = g.community.length ? T('street.' + g.street) : '';
 
-    /* 상단 메타 */
+    /* 상단 메타 — 구분점은 CSS 가 붙인다 (항목을 숨기면 구분점도 같이 사라진다) */
     const hero = g.byId(HERO_ID);
     const parts = [];
-    parts.push('<span>' + T('top.hand') + ' <b>#' + g.handNo + '</b></span>');
-    if (g.levelEvery) {
-      parts.push('<span>' + T('tour.level', { n: g.levelIndex + 1 }) + '</span>');
+    function item(html, optional) {
+      parts.push('<span class="meta-item' + (optional ? ' opt' : '') + '">' + html + '</span>');
     }
-    parts.push('<span>' + T('top.blinds') + ' <b>' + g.smallBlind + '/' + g.bigBlind +
-      (g.ante ? '+' + g.ante : '') + '</b></span>');
-    if (hero) parts.push('<span>' + T('top.myChips') + ' <b>' + num(hero.chips) + '</b></span>');
+    /* 라벨은 아주 좁은 화면에서 숨긴다 ("핸드 #1" -> "#1") */
+    function labeled(label, value) {
+      return '<i class="lbl">' + label + '</i> <b>' + value + '</b>';
+    }
+    item(labeled(T('top.hand'), '#' + g.handNo));
+    if (g.levelEvery) item(T('tour.level', { n: g.levelIndex + 1 }), true);
+    item(labeled(T('top.blinds'), g.smallBlind + '/' + g.bigBlind + (g.ante ? '+' + g.ante : '')));
+    if (hero) item(labeled(T('top.myChips'), num(hero.chips)));
     const nextLv = g.nextLevelIn();
-    if (nextLv != null) parts.push('<span class="dim">' + T('tour.nextLevel', { n: nextLv }) + '</span>');
-    if (g.players.length > 2) parts.push('<span class="dim">' + T('tour.remaining', { n: g.players.length }) + '</span>');
-    $('topMeta').innerHTML = parts.join('<span class="sep">·</span>');
+    if (nextLv != null) item(T('tour.nextLevel', { n: nextLv }), true);
+    if (g.players.length > 2) item(T('tour.remaining', { n: g.players.length }), true);
+    $('topMeta').innerHTML = parts.join('');
   }
 
   /* ==================== 히어로 정보 ==================== */
@@ -493,8 +513,9 @@
   }
 
   /* ==================== 애니메이션 ==================== */
-  function flyChip(fromEl, toEl, count) {
+  function flyChip(fromEl, toEl, count, amount) {
     if (!fromEl || !toEl) return;
+    const denom = H.cardart.denomFor(amount || 100);
     const layer = $('chipLayer');
     const fr = fromEl.getBoundingClientRect();
     const tr = toEl.getBoundingClientRect();
@@ -503,8 +524,9 @@
     for (let i = 0; i < n; i++) {
       const c = document.createElement('div');
       c.className = 'fly-chip';
-      c.style.left = (fr.left - lr.left + fr.width / 2 - 7 + (i - n / 2) * 3) + 'px';
-      c.style.top = (fr.top - lr.top + fr.height / 2 - 7) + 'px';
+      c.appendChild(H.cardart.chip(denom, 18));
+      c.style.left = (fr.left - lr.left + fr.width / 2 - 9 + (i - n / 2) * 4) + 'px';
+      c.style.top = (fr.top - lr.top + fr.height / 2 - 9) + 'px';
       layer.appendChild(c);
       const dx = (tr.left - fr.left) + (tr.width - fr.width) / 2;
       const dy = (tr.top - fr.top) + (tr.height - fr.height) / 2;
@@ -523,7 +545,7 @@
     g.players.forEach(function (p) {
       if (p.bet > 0) {
         const e = state.seatEls[p.id];
-        if (e) flyChip(e.bet, pot, 3);
+        if (e) flyChip(e.bet, pot, 3, p.bet);
       }
     });
   }
@@ -534,7 +556,7 @@
     g.players.forEach(function (p) {
       if (p.won > 0) {
         const e = state.seatEls[p.id];
-        if (e) flyChip(pot, e.plate || e.root, 5);
+        if (e) flyChip(pot, e.plate || e.root, 5, p.won);
       }
     });
   }

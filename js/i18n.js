@@ -96,6 +96,11 @@
     'top.menu': ['메뉴', 'Menu'],
 
     /* --- 테이블 --- */
+    'suit.s': ['스페이드', 'spades'],
+    'suit.h': ['하트', 'hearts'],
+    'suit.d': ['다이아몬드', 'diamonds'],
+    'suit.c': ['클럽', 'clubs'],
+    'card.back': ['뒷면', 'face down'],
     'table.pot': ['팟', 'Pot'],
     'table.youPlayer': ['플레이어', 'You'],
     'table.dealerButton': ['딜러 버튼', 'Dealer button'],

@@ -100,6 +100,9 @@ async function playHands(page, target, opts) {
   await page.selectOption('#optStructure', '10');
   await page.selectOption('#optAnte', 'all');
   await page.fill('#optSeed', 'E2E001');
+  /* 자동 리뷰 모달은 핸드가 끝난 뒤 임의의 시점에 떠서 클릭과 경합한다.
+     리뷰 기능은 아래에서 버튼으로 직접 열어 검사하므로 여기서는 끈다. */
+  await page.uncheck('#optReview');
   await page.click('#btnStart');
   await page.waitForTimeout(600);
 

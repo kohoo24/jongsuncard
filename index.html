@@ -8,6 +8,7 @@
 <title>텍사스 홀덤</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>♠</text></svg>">
+<link rel="stylesheet" href="css/font.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -24,6 +25,7 @@
   </header>
 
   <main class="stage">
+    <div class="rail">
     <div class="felt" id="felt">
       <div class="table-center">
         <div class="pots" id="pots" aria-live="polite"></div>
@@ -33,6 +35,7 @@
       <div class="seats" id="seats"></div>
       <div class="chip-layer" id="chipLayer" aria-hidden="true"></div>
       <div class="result-banner" id="resultBanner" role="status"></div>
+    </div>
     </div>
 
     <aside class="side" id="sidePanel" aria-label="정보 패널">
@@ -159,6 +162,7 @@
 </div>
 
 <script src="js/cards.js"></script>
+<script src="js/cardart.js"></script>
 <script src="js/i18n.js"></script>
 <script src="js/rng.js"></script>
 <script src="js/evaluator.js"></script>
