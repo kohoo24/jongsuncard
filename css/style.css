@@ -193,6 +193,12 @@ button.ghost[aria-pressed="false"] { opacity: .45; }
   font-size: 17px;
   flex: none;
 }
+.seat .avatar.pop { animation: facePop .32s ease-out; }
+@keyframes facePop {
+  0% { transform: scale(.75); }
+  55% { transform: scale(1.18); }
+  100% { transform: none; }
+}
 .seat .clock-ring {
   position: absolute;
   left: 4px; top: 50%;
@@ -603,7 +609,13 @@ kbd {
   .seat { width: 112px; }
   .seat .plate { padding: 5px 6px; gap: 5px; }
   .seat .avatar { width: 24px; height: 24px; font-size: 14px; }
-  .seat .clock-ring { width: 28px; height: 28px; -webkit-mask: radial-gradient(circle, transparent 10px, #000 11px); mask: radial-gradient(circle, transparent 10px, #000 11px); }
+  .seat .avatar.pop { animation: facePop .32s ease-out; }
+@keyframes facePop {
+  0% { transform: scale(.75); }
+  55% { transform: scale(1.18); }
+  100% { transform: none; }
+}
+.seat .clock-ring { width: 28px; height: 28px; -webkit-mask: radial-gradient(circle, transparent 10px, #000 11px); mask: radial-gradient(circle, transparent 10px, #000 11px); }
   .seat .cards { min-height: 46px; }
   .card.small { width: 32px; height: 46px; }
   .card.small .r { font-size: 12px; }
@@ -628,5 +640,5 @@ kbd {
   .seat .think { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .card, .fly-chip { animation: none !important; transition: none !important; }
+  .card, .fly-chip, .seat .avatar { animation: none !important; transition: none !important; }
 }

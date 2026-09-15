@@ -25,6 +25,31 @@
 
   const AVATARS = ['🦅', '🦊', '🐺', '🐱', '🐸', '🦉', '🐻', '🦌'];
 
+  /*
+   * 표정은 "방금 한 액션"에만 반응한다. 패의 강도에 반응하게 만들면 그게 곧 텔이 되어
+   * 봇이 역으로 읽히고, 어렵게 올려놓은 실력이 무의미해진다.
+   */
+  const FACE = {
+    turn: '🤔', fold: '😕', check: '😐', call: '🙂',
+    raise: '😤', allin: '😎', won: '🤑'
+  };
+
+  function faceFor(game, p, isTurn) {
+    if (game.phase === 'hand-over' && p.won > 0) return FACE.won;
+    if (isTurn && !p.isHuman) return FACE.turn;
+    if (p.folded) return FACE.fold;
+    if (p.allIn) return FACE.allin;
+    switch (p.lastActionKey) {
+      case 'act.fold': return FACE.fold;
+      case 'act.check': return FACE.check;
+      case 'act.call': return FACE.call;
+      case 'act.bet':
+      case 'act.raise': return FACE.raise;
+      case 'act.allin': return FACE.allin;
+      default: return null;
+    }
+  }
+
   const state = {
     game: null, tracker: null, recorder: null, settings: null,
     seatEls: {}, communityRendered: 0, timer: null, clockTimer: null,
@@ -130,7 +155,8 @@
       ring.className = 'clock-ring';
       const av = document.createElement('div');
       av.className = 'avatar';
-      av.textContent = p.isHuman ? '😎' : AVATARS[(g.players.indexOf(p) * 3) % AVATARS.length];
+      const base = p.isHuman ? '🙂' : AVATARS[(g.players.indexOf(p) * 3) % AVATARS.length];
+      av.textContent = base;
       const info = document.createElement('div');
       info.className = 'info';
       const name = document.createElement('div');
@@ -157,7 +183,8 @@
 
       state.seatEls[p.id] = {
         root: seat, cards: cards, name: name, chips: chips, last: last,
-        bet: bet, badge: badge, think: think, ring: ring, avatar: av, sig: ''
+        bet: bet, badge: badge, think: think, ring: ring, avatar: av,
+        baseAvatar: base, sig: ''
       };
     });
   }
@@ -178,6 +205,14 @@
       else e.last.textContent = p.lastActionKey ? p.lastAction : '';
 
       const isTurn = actor === p && g.phase === 'awaiting-action';
+      const face = faceFor(g, p, isTurn);
+      const next = face || e.baseAvatar;
+      if (e.avatar.textContent !== next) {
+        e.avatar.textContent = next;
+        e.avatar.classList.remove('pop');
+        void e.avatar.offsetWidth;          // 애니메이션 재시작
+        e.avatar.classList.add('pop');
+      }
       e.root.classList.toggle('turn', isTurn);
       e.root.classList.toggle('folded', p.folded);
       e.root.classList.toggle('winner', g.phase === 'hand-over' && p.won > 0);
