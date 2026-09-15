@@ -467,12 +467,18 @@
       const s = steps[idx];
       potEl.textContent = T('table.pot') + ' ' + num(s.pot);
       board.innerHTML = '';
-      s.community.forEach(function (c) {
-        const card = el('div', 'card small' + (H.cards.isRed(c) ? ' red' : ''));
-        card.appendChild(el('div', 'r', H.cards.RANK_LABEL[c.rank]));
-        card.appendChild(el('div', 's', H.cards.SUIT_LABEL[c.suit]));
-        board.appendChild(card);
-      });
+      if (!s.community.length) {
+        // 프리플랍에는 보드가 비어 빈 칸처럼 보이므로 스트리트 이름을 대신 둔다
+        board.appendChild(el('span', 'replay-preflop', T('street.preflop')));
+      } else {
+        s.community.forEach(function (c) {
+          const card = el('div', 'card small' + (H.cards.isRed(c) ? ' red' : ''));
+          card.dataset.suit = c.suit;
+          card.appendChild(el('div', 'r', H.cards.RANK_LABEL[c.rank]));
+          card.appendChild(el('div', 's', H.cards.SUIT_LABEL[c.suit]));
+          board.appendChild(card);
+        });
+      }
       seatsEl.innerHTML = '';
       hand.seats.forEach(function (seat) {
         const folded = hand.actions.some(function (a) {

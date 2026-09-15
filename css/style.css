@@ -450,7 +450,14 @@ button.ghost[aria-pressed="false"] { opacity: .45; }
 .review-draws { font-size: 11px; color: #9fd4ff; margin-top: 3px; }
 
 /* 리플레이 */
-.replay-board { display: flex; gap: 5px; justify-content: center; min-height: 58px; margin: 10px 0; }
+.replay-board {
+  display: flex; gap: 5px; justify-content: center; align-items: center;
+  min-height: 58px; margin: 10px 0;
+}
+.replay-preflop {
+  font-size: 12px; letter-spacing: .14em;
+  color: rgba(255, 255, 255, .28);
+}
 .replay-pot { text-align: center; color: var(--gold); font-weight: 600; }
 .replay-seats { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
 .replay-seat {
