@@ -3,6 +3,8 @@
  */
 const H = require('../js/engine.js');
 require('../js/ai.js');
+require('../js/rng.js');
+require('../js/i18n.js');
 const C = H.cards;
 
 let passed = 0, failed = 0;
@@ -242,6 +244,137 @@ test('장기 자동 플레이 안정성 (봇 100핸드)', function () {
     eq(total, start, '핸드 ' + hands + ' 이후 칩 총량');
   }
   assert(hands > 10, '충분히 많은 핸드가 진행되어야 한다 (진행: ' + hands + ')');
+});
+
+console.log('\n[고속 평가기 교차검증]');
+// 독립적인 레퍼런스 구현(21조합 브루트포스)과 순위가 일치하는지 검증한다.
+function refEval5(cards) {
+  const ranks = cards.map(c => c.rank).sort((a, b) => b - a);
+  const isFlush = cards.every(c => c.suit === cards[0].suit);
+  const counts = {};
+  ranks.forEach(r => counts[r] = (counts[r] || 0) + 1);
+  const groups = Object.keys(counts).map(r => [+r, counts[r]])
+    .sort((a, b) => b[1] - a[1] || b[0] - a[0]);
+  let sh = 0;
+  if (groups.length === 5) {
+    if (ranks[0] - ranks[4] === 4) sh = ranks[0];
+    else if (ranks[0] === 14 && ranks[1] === 5 && ranks[4] === 2) sh = 5;
+  }
+  let cat, tb;
+  if (isFlush && sh) { cat = 8; tb = [sh]; }
+  else if (groups[0][1] === 4) { cat = 7; tb = [groups[0][0], groups[1][0]]; }
+  else if (groups[0][1] === 3 && groups[1][1] === 2) { cat = 6; tb = [groups[0][0], groups[1][0]]; }
+  else if (isFlush) { cat = 5; tb = ranks.slice(); }
+  else if (sh) { cat = 4; tb = [sh]; }
+  else if (groups[0][1] === 3) { cat = 3; tb = [groups[0][0], groups[1][0], groups[2][0]]; }
+  else if (groups[0][1] === 2 && groups[1][1] === 2) { cat = 2; tb = [groups[0][0], groups[1][0], groups[2][0]]; }
+  else if (groups[0][1] === 2) { cat = 1; tb = [groups[0][0], groups[1][0], groups[2][0], groups[3][0]]; }
+  else { cat = 0; tb = ranks.slice(); }
+  let v = cat;
+  for (let i = 0; i < 5; i++) v = v * 15 + (tb[i] || 0);
+  return v;
+}
+function refEval(cards) {
+  let best = -1;
+  const n = cards.length;
+  for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) for (let c = b + 1; c < n; c++)
+    for (let d = c + 1; d < n; d++) for (let e = d + 1; e < n; e++) {
+      const v = refEval5([cards[a], cards[b], cards[c], cards[d], cards[e]]);
+      if (v > best) best = v;
+    }
+  return best;
+}
+
+test('레퍼런스 구현과 점수가 완전히 일치 (7장 x 20,000회)', function () {
+  const deck = C.makeDeck();
+  let bad = 0, sample = '';
+  for (let i = 0; i < 20000; i++) {
+    C.shuffle(deck);
+    const seven = deck.slice(0, 7);
+    const fast = H.eval.evaluate(seven).value;
+    const slow = refEval(seven);
+    if (fast !== slow) { bad++; if (!sample) sample = seven.map(C.cardToString).join(' ') + ' fast=' + fast + ' ref=' + slow; }
+  }
+  eq(bad, 0, '불일치 ' + bad + '건 ' + sample);
+});
+
+test('5장/6장 입력도 레퍼런스와 일치', function () {
+  const deck = C.makeDeck();
+  let bad = 0;
+  for (let i = 0; i < 4000; i++) {
+    C.shuffle(deck);
+    for (const n of [5, 6]) {
+      const hand = deck.slice(0, n);
+      if (H.eval.evaluate(hand).value !== refEval(hand)) bad++;
+    }
+  }
+  eq(bad, 0);
+});
+
+test('best5 는 실제로 최고 점수를 내는 5장', function () {
+  const deck = C.makeDeck();
+  for (let i = 0; i < 2000; i++) {
+    C.shuffle(deck);
+    const seven = deck.slice(0, 7);
+    const five = H.eval.best5(seven);
+    eq(five.length, 5);
+    eq(H.eval.evaluate(five).value, H.eval.evaluate(seven).value, '시도 ' + i);
+    // 돌려준 5장이 원본에 실제로 들어있는지
+    five.forEach(function (c) {
+      assert(seven.indexOf(c) >= 0, 'best5 가 원본에 없는 카드를 반환');
+    });
+  }
+});
+
+test('고속 평가기가 레퍼런스보다 최소 20배 빠르다', function () {
+  const deck = C.shuffle(C.makeDeck());
+  const seven = deck.slice(0, 7);
+  let t = Date.now(), nFast = 0;
+  while (Date.now() - t < 300) { H.eval.evaluate(seven); nFast++; }
+  t = Date.now(); let nRef = 0;
+  while (Date.now() - t < 300) { refEval(seven); nRef++; }
+  const ratio = nFast / nRef;
+  assert(ratio >= 20, '배속이 ' + ratio.toFixed(1) + '배에 그침');
+  console.log('      (' + Math.round(nFast / 0.3).toLocaleString() + ' 회/초, 레퍼런스 대비 ' + ratio.toFixed(0) + '배)');
+});
+
+console.log('\n[시드 RNG]');
+test('같은 시드는 같은 카드 순서를 만든다', function () {
+  function firstCards(seed) {
+    const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(seed) });
+    for (let i = 0; i < 4; i++) g.addPlayer({ name: 'P' + i, chips: 1000 });
+    g.startHand();
+    return g.players.map(p => p.cards.map(C.cardToString).join('')).join('|');
+  }
+  eq(firstCards(42), firstCards(42), '같은 시드');
+  assert(firstCards(42) !== firstCards(43), '다른 시드는 달라야 한다');
+});
+test('시드 문자열 왕복 변환', function () {
+  for (let i = 0; i < 100; i++) {
+    const s = H.rng.randomSeed();
+    eq(H.rng.decode(H.rng.encode(s)), s);
+  }
+});
+
+console.log('\n[i18n]');
+test('모든 키가 ko/en 양쪽에 존재', function () {
+  const keys = H.i18n.keys();
+  assert(keys.length > 150, '키가 너무 적음');
+  ['ko', 'en'].forEach(function (lang) {
+    H.i18n.setLang(lang);
+    keys.forEach(function (k) {
+      const v = H.i18n.t(k);
+      assert(v && v !== k, lang + ' 누락: ' + k);
+    });
+  });
+  H.i18n.setLang('ko');
+});
+test('언어 전환이 핸드 설명에 반영된다', function () {
+  const h = H.eval.evaluate('As Ks Qs Js 10s'.split(' ').map(C.parseCard));
+  H.i18n.setLang('en');
+  eq(H.eval.describe(h), 'Royal Flush');
+  H.i18n.setLang('ko');
+  eq(H.eval.describe(h), '로열 플러시');
 });
 
 console.log('\n결과: ' + passed + ' 통과, ' + failed + ' 실패\n');

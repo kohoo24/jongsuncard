@@ -66,3 +66,12 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
 if (typeof module !== 'undefined' && module.exports) module.exports = globalThis.Holdem;
+
+/* 정수 코드 변환 (평가기/시뮬레이터 핫패스용) */
+(function (global) {
+  const H = global.Holdem;
+  const SUIT_IDX = { s: 0, h: 1, d: 2, c: 3 };
+  const SUITS = ['s', 'h', 'd', 'c'];
+  H.cards.code = function (c) { return (c.rank - 2) * 4 + SUIT_IDX[c.suit]; };
+  H.cards.fromCode = function (n) { return { rank: (n >> 2) + 2, suit: SUITS[n & 3] }; };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
