@@ -4,6 +4,9 @@
 const H = require('../js/engine.js');
 require('../js/ai.js');
 require('../js/rng.js');
+require('../js/ranges.js');
+require('../js/equity.js');
+require('../js/stats.js');
 require('../js/i18n.js');
 const C = H.cards;
 
@@ -375,6 +378,335 @@ test('언어 전환이 핸드 설명에 반영된다', function () {
   eq(H.eval.describe(h), 'Royal Flush');
   H.i18n.setLang('ko');
   eq(H.eval.describe(h), '로열 플러시');
+});
+
+console.log('\n[프리플랍 레인지]');
+const RG = H.ranges;
+test('핸드 순위가 포커 상식과 맞는다', function () {
+  // 표준 차트 순서: AA KK QQ JJ AKs TT AKo AQs ...
+  const order = ['AA', 'KK', 'QQ', 'JJ', 'AKs', 'TT', 'AKo', 'AQs', '99', 'KQs', '77', 'A9o', '72o'];
+  for (let i = 1; i < order.length; i++) {
+    assert(RG.percentile(order[i - 1]) < RG.percentile(order[i]),
+      order[i - 1] + ' 가 ' + order[i] + ' 보다 위여야 한다');
+  }
+  assert(RG.percentile('AA') < 0.01, 'AA 는 최상위');
+  assert(RG.percentile('72o') > 0.98, '72o 는 최하위');
+});
+test('169개 클래스가 1326 콤보를 모두 덮는다', function () {
+  eq(RG.RANKED.length, 169);
+  const total = RG.RANKED.reduce(function (s, r) { return s + r[1]; }, 0);
+  eq(total, 1326);
+  assert(Math.abs(RG.RANKED[168][2] - 1) < 0.001, '누적 비율이 1 로 끝나야 한다');
+});
+test('포지션 판별', function () {
+  eq(RG.positionOf(0, 0, 6), 'BTN');
+  eq(RG.positionOf(1, 0, 6), 'SB');
+  eq(RG.positionOf(2, 0, 6), 'BB');
+  eq(RG.positionOf(3, 0, 6), 'UTG');
+  eq(RG.positionOf(5, 0, 6), 'CO');
+  eq(RG.positionOf(0, 0, 2), 'BTN');
+  eq(RG.positionOf(1, 0, 2), 'BB');
+});
+test('오픈 레인지는 포지션이 좋을수록 넓다', function () {
+  assert(RG.openPercent('UTG', 6) < RG.openPercent('MP', 6));
+  assert(RG.openPercent('MP', 6) < RG.openPercent('CO', 6));
+  assert(RG.openPercent('CO', 6) < RG.openPercent('BTN', 6));
+  assert(RG.openPercent('BTN', 2) > RG.openPercent('BTN', 6), '인원이 적으면 넓어진다');
+});
+test('13x13 차트 격자', function () {
+  const g = RG.chartGrid();
+  eq(g.length, 13); eq(g[0].length, 13);
+  eq(g[0][0], 'AA'); eq(g[0][1], 'AKs'); eq(g[1][0], 'AKo'); eq(g[12][12], '22');
+});
+
+console.log('\n[레인지 기반 승률]');
+const EQ = H.equity;
+function codes(str) { return str.split(/\s+/).map(C.parseCard).map(C.code); }
+function eqOf(hole, board, band, keepTop, nOpp, sims) {
+  const h = codes(hole);
+  const b = board ? codes(board) : [];
+  const dist = b.length >= 3 ? EQ.boardDistribution(b, h) : null;
+  const combos = [];
+  for (let i = 0; i < nOpp; i++) combos.push(EQ.buildCombos({ band: band, keepTop: keepTop }, b, h, dist));
+  return EQ.vsRanges({ hole: h, board: b, combos: combos, sims: sims || 6000, seed: 1234 }).equity;
+}
+test('AA 의 헤즈업 승률은 약 85%', function () {
+  const e = eqOf('As Ad', '', RG.band(0, 1), 1, 1);
+  assert(e > 0.83 && e < 0.88, '실제 ' + (e * 100).toFixed(1) + '%');
+});
+test('타이트한 레인지 상대면 투기적 핸드의 승률이 크게 떨어진다', function () {
+  const cases = [['9s 9h', 0.12], ['Jh Th', 0.15], ['Ac 5c', 0.15]];
+  cases.forEach(function (c) {
+    const vsRandom = eqOf(c[0], '', RG.band(0, 1), 1, 1);
+    const vsTight = eqOf(c[0], '', RG.band(0, 0.15), 1, 1);
+    assert(vsRandom - vsTight > c[1],
+      c[0] + ': 랜덤 ' + (vsRandom * 100).toFixed(1) + '% vs 타이트 ' + (vsTight * 100).toFixed(1) + '% (차이가 너무 작음)');
+  });
+});
+test('상대가 많을수록 승률이 낮아진다', function () {
+  const e1 = eqOf('Ks Qs', '', RG.band(0, 1), 1, 1);
+  const e3 = eqOf('Ks Qs', '', RG.band(0, 1), 1, 3);
+  const e5 = eqOf('Ks Qs', '', RG.band(0, 1), 1, 5);
+  assert(e1 > e3 && e3 > e5, e1.toFixed(3) + ' > ' + e3.toFixed(3) + ' > ' + e5.toFixed(3));
+});
+test('keepTop 이 작을수록(강한 레인지) 내 승률이 낮아진다', function () {
+  const wide = eqOf('As Kd', 'Ah 7c 2d', RG.band(0, 0.3), 1, 1);
+  const strong = eqOf('As Kd', 'Ah 7c 2d', RG.band(0, 0.3), 0.25, 1);
+  assert(wide > strong + 0.05, '넓은 ' + wide.toFixed(3) + ' vs 강한 ' + strong.toFixed(3));
+});
+test('보드 강도 분포 크기가 정확하다', function () {
+  const b = codes('Ah 7c 2d'), h = codes('As Kd');
+  const dist = EQ.boardDistribution(b, h);
+  eq(dist.length, 47 * 46 / 2, '플랍 + 내 홀카드 제외 = 47장에서 2장');
+  for (let i = 1; i < dist.length; i++) assert(dist[i] >= dist[i - 1], '정렬되어야 한다');
+});
+test('buildCombos 는 밴드 밖의 핸드를 제외한다', function () {
+  const b = [], h = codes('As Kd');
+  const list = EQ.buildCombos({ band: RG.band(0, 0.05), keepTop: 1 }, b, h, null);
+  for (let i = 0; i < list.length; i += 2) {
+    const pct = RG.percentile(RG.classOfCodes(list[i], list[i + 1]));
+    assert(pct <= 0.05, '밴드 밖 핸드가 포함됨');
+  }
+  assert(list.length >= 8, '조합이 너무 적음');
+});
+test('폴드 확률은 베팅이 클수록 높다', function () {
+  const r = { band: RG.band(0, 1), keepTop: 1 };
+  const small = EQ.foldProbability(100, 30, r, 1.25);
+  const big = EQ.foldProbability(100, 150, r, 1.25);
+  assert(big > small, small.toFixed(2) + ' -> ' + big.toFixed(2));
+  const strong = EQ.foldProbability(100, 70, { band: RG.band(0, 1), keepTop: 0.15 }, 1.25);
+  const weak = EQ.foldProbability(100, 70, r, 1.25);
+  assert(weak > strong, '강한 레인지는 덜 접는다');
+});
+
+console.log('\n[아웃 카운터]');
+test('교과서 값과 일치한다', function () {
+  function outs(h, b) { return EQ.analyzeDraws(h.split(/\s+/).map(C.parseCard), b.split(/\s+/).map(C.parseCard)).outs; }
+  eq(outs('As Kd', 'Qh 7c 2s'), 6, '오버카드 2장 = 6아웃');
+  const fd = outs('Ah Kh', 'Qh 7h 2s');
+  assert(fd >= 12 && fd <= 15, '플러시 드로우 + 오버카드 = 12~15아웃 (실제 ' + fd + ')');
+  eq(outs('As Ad', 'Ah 7c 2s'), 0, '이미 완성된 핸드는 아웃 0');
+});
+test('드로우 라벨', function () {
+  function labels(h, b) { return EQ.analyzeDraws(h.split(/\s+/).map(C.parseCard), b.split(/\s+/).map(C.parseCard)).labels.join(','); }
+  assert(labels('Ah Kh', 'Qh 7h 2s').indexOf('플러시') >= 0);
+  assert(labels('9s 8s', '7h 6d 2c').indexOf('양차') >= 0);
+  assert(labels('As Ad', 'Ah 7c 2s').indexOf('완성') >= 0);
+});
+
+console.log('\n[AI 의사결정]');
+function makeGame(nPlayers, chips, diff) {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(777) });
+  for (let i = 0; i < nPlayers; i++) {
+    g.addPlayer({ id: i, name: 'P' + i, chips: chips || 2000, profile: H.ai.PROFILES[1] });
+  }
+  return g;
+}
+function forceCards(player, str) { player.cards = str.split(/\s+/).map(C.parseCard); }
+
+test('UTG 에서 72o 는 접고 AA 는 레이즈한다', function () {
+  for (let trial = 0; trial < 6; trial++) {
+    const g = makeGame(6);
+    g.startHand();
+    const p = g.currentActor();
+    forceCards(p, '7d 2c');
+    eq(H.ai.decide(g, p, { difficulty: 'normal' }).type, 'fold', '72o 는 폴드');
+    forceCards(p, 'As Ad');
+    eq(H.ai.decide(g, p, { difficulty: 'normal' }).type, 'raise', 'AA 는 레이즈');
+  }
+});
+test('AA 는 레이즈에 직면해도 3벳한다', function () {
+  const g = makeGame(6);
+  g.startHand();
+  const opener = g.currentActor();
+  g.act(opener.id, { type: 'raise', amount: 60 });
+  const p = g.currentActor();
+  forceCards(p, 'Ah Ac');
+  const d = H.ai.decide(g, p, { difficulty: 'normal' });
+  eq(d.type, 'raise');
+  assert(d.amount > 60, '3벳 금액이 오픈보다 커야 한다');
+});
+test('버튼 오픈 레인지가 UTG 보다 넓다', function () {
+  function opensFrom(pos) {
+    let opens = 0, total = 0;
+    const deck = C.makeDeck();
+    for (let i = 0; i < 60; i++) {
+      const g = makeGame(6);
+      g.startHand();
+      // 원하는 포지션까지 폴드시킨다
+      let guard = 0;
+      while (g.phase === 'awaiting-action' && guard++ < 10) {
+        const cur = g.currentActor();
+        if (RG.positionOf(g.players.indexOf(cur), g.button, 6) === pos) break;
+        g.act(cur.id, { type: 'fold' });
+      }
+      if (g.phase !== 'awaiting-action') continue;
+      const p = g.currentActor();
+      if (RG.positionOf(g.players.indexOf(p), g.button, 6) !== pos) continue;
+      C.shuffle(deck);
+      p.cards = [deck[0], deck[1]];
+      total++;
+      if (H.ai.decide(g, p, { difficulty: 'normal' }).type === 'raise') opens++;
+    }
+    return total ? opens / total : 0;
+  }
+  const utg = opensFrom('UTG'), btn = opensFrom('BTN');
+  assert(btn > utg, 'BTN ' + (btn * 100).toFixed(0) + '% 가 UTG ' + (utg * 100).toFixed(0) + '% 보다 넓어야 한다');
+});
+test('숏스택은 푸시 오어 폴드로 전환한다', function () {
+  let pushes = 0;
+  for (let i = 0; i < 40; i++) {
+    const g = makeGame(4, 120);   // 6bb
+    g.startHand();
+    if (g.phase !== 'awaiting-action') continue;
+    const p = g.currentActor();
+    forceCards(p, 'As Kh');
+    const d = H.ai.decide(g, p, { difficulty: 'normal' });
+    if (d.type === 'raise' && d.amount === g.actionsFor(p).maxRaiseTo) pushes++;
+  }
+  assert(pushes > 25, 'AK 숏스택이면 대부분 올인해야 한다 (실제 ' + pushes + '/40)');
+});
+test('레인지를 액션에서 역산한다', function () {
+  const g = makeGame(6);
+  g.startHand();
+  const opener = g.currentActor();
+  g.act(opener.id, { type: 'raise', amount: 60 });
+  const me = g.currentActor();
+  const ctx = { game: g, diff: H.ai.DIFFICULTY.normal, tracker: null };
+  const r = H.ai.inferRange(ctx, opener);
+  assert(r.band.hi < 0.35, '오픈 레이즈한 상대의 레인지는 좁아야 한다 (실제 상위 ' + (r.band.hi * 100).toFixed(0) + '%)');
+  const folder = g.players.filter(function (p) { return p !== opener && p !== me; })[0];
+  const rf = H.ai.inferRange(ctx, folder);
+  assert(rf.band.hi > r.band.hi, '아직 액션하지 않은 상대의 레인지가 더 넓어야 한다');
+});
+
+console.log('\n[AI 플레이 스타일 회귀 검사]');
+test('봇 통계가 현실적인 범위에 들어온다', function () {
+  const BB = 20;
+  const g = new H.Game({ smallBlind: BB / 2, bigBlind: BB, rng: H.rng.create(20240101) });
+  H.ai.PROFILES.forEach(function (prof, i) {
+    g.addPlayer({ id: i, name: prof.key, chips: BB * 100, profile: prof });
+  });
+  const tracker = H.stats.create({ bigBlind: BB });
+  for (let h = 0; h < 300; h++) {
+    g.players.forEach(function (p) { p.chips = BB * 100; });
+    tracker.startHand(g);
+    g.startHand();
+    let guard = 0;
+    while (g.phase !== 'hand-over' && g.phase !== 'game-over' && guard++ < 300) {
+      if (g.phase === 'awaiting-action') {
+        const p = g.currentActor();
+        const d = H.ai.decide(g, p, { difficulty: 'normal', tracker: tracker });
+        const res = g.act(p.id, d);
+        assert(res.ok, '봇이 불가능한 액션을 냈다: ' + JSON.stringify(d) + ' / ' + res.error);
+      } else if (g.phase === 'need-street') g.dealNextStreet();
+      else if (g.phase === 'showdown') g.resolveShowdown();
+    }
+    tracker.endHand(g);
+  }
+  const all = tracker.all();
+  const avgVpip = all.reduce(function (s, x) { return s + x.vpip; }, 0) / all.length;
+  const avgPfr = all.reduce(function (s, x) { return s + x.pfr; }, 0) / all.length;
+  const avgAf = all.reduce(function (s, x) { return s + x.af; }, 0) / all.length;
+  console.log('      (VPIP ' + (avgVpip * 100).toFixed(0) + '% · PFR ' + (avgPfr * 100).toFixed(0) +
+    '% · AF ' + avgAf.toFixed(1) + ')');
+  // 이전 구현은 VPIP 48~58% / PFR 0~8% 의 루즈-패시브였다
+  assert(avgVpip > 0.15 && avgVpip < 0.55, 'VPIP 가 범위를 벗어남: ' + (avgVpip * 100).toFixed(0) + '%');
+  assert(avgPfr > 0.12, 'PFR 이 너무 낮음(패시브): ' + (avgPfr * 100).toFixed(0) + '%');
+  assert(avgVpip / avgPfr < 2.6, 'VPIP/PFR 비율이 너무 높음(림프 과다): ' + (avgVpip / avgPfr).toFixed(2));
+  assert(avgAf > 1.0, 'AF 가 너무 낮음(패시브): ' + avgAf.toFixed(2));
+
+  const tight = all.find(function (x) { return x.name === 'rock'; });
+  const loose = all.find(function (x) { return x.name === 'station'; });
+  assert(tight.vpip < loose.vpip, '타이트 성향이 콜링스테이션보다 좁아야 한다');
+});
+
+test('난이도가 높을수록 강하다 (normal vs easy, 800핸드)', function () {
+  const BB = 20, START = BB * 100;
+  const g = new H.Game({ smallBlind: BB / 2, bigBlind: BB, rng: H.rng.create(5150) });
+  const diffs = ['normal', 'easy', 'normal', 'easy'];
+  for (let i = 0; i < 4; i++) g.addPlayer({ id: i, name: diffs[i] + i, chips: START, profile: H.ai.PROFILES[1] });
+  const tracker = H.stats.create({ bigBlind: BB });
+  const net = [0, 0, 0, 0];
+  const hands = 800;
+  for (let h = 0; h < hands; h++) {
+    g.players.forEach(function (p) { p.chips = START; });
+    tracker.startHand(g);
+    g.startHand();
+    let guard = 0;
+    while (g.phase !== 'hand-over' && g.phase !== 'game-over' && guard++ < 300) {
+      if (g.phase === 'awaiting-action') {
+        const p = g.currentActor();
+        g.act(p.id, H.ai.decide(g, p, { difficulty: diffs[g.players.indexOf(p)], tracker: tracker }));
+      } else if (g.phase === 'need-street') g.dealNextStreet();
+      else if (g.phase === 'showdown') g.resolveShowdown();
+    }
+    tracker.endHand(g);
+    g.players.forEach(function (p, i) { net[i] += p.chips - START; });
+  }
+  const normalBb = (net[0] + net[2]) / BB / (hands * 2) * 100;
+  console.log('      (normal ' + (normalBb >= 0 ? '+' : '') + normalBb.toFixed(0) + 'bb/100)');
+  assert(normalBb > 10, 'normal 이 easy 를 이겨야 한다 (실제 ' + normalBb.toFixed(0) + 'bb/100)');
+});
+
+console.log('\n[통계 추적]');
+test('VPIP/PFR/폴드율을 정확히 센다', function () {
+  const g = makeGame(4);
+  const tr = H.stats.create({ bigBlind: 20 });
+  tr.startHand(g);
+  g.startHand();
+  const first = g.currentActor();
+  g.act(first.id, { type: 'raise', amount: 60 });     // PFR + VPIP
+  const second = g.currentActor();
+  g.act(second.id, { type: 'fold' });                  // 폴드 (프리플랍)
+  let guard = 0;
+  while (g.phase !== 'hand-over' && guard++ < 50) {
+    if (g.phase === 'awaiting-action') {
+      const a = g.actionsFor(g.currentActor());
+      g.act(g.currentActor().id, { type: a.canCheck ? 'check' : 'fold' });
+    } else if (g.phase === 'need-street') g.dealNextStreet();
+    else if (g.phase === 'showdown') g.resolveShowdown();
+  }
+  tr.endHand(g);
+  const s1 = tr.get(first.id);
+  eq(s1.vpip, 1, '레이즈했으므로 VPIP 100%');
+  eq(s1.pfr, 1, 'PFR 100%');
+  const s2 = tr.get(second.id);
+  eq(s2.vpip, 0, '폴드했으므로 VPIP 0%');
+  eq(s2.foldToBetPre, 1, '프리플랍 폴드율 100%');
+});
+test('프리플랍/포스트플랍 폴드율을 분리한다', function () {
+  const tr = H.stats.create({ bigBlind: 20 });
+  tr.ensure(1, 'X');
+  const d = tr.data[1];
+  d.hands = 10;
+  d.facedBetPre = 8; d.foldedToBetPre = 7;
+  d.facedBetPost = 6; d.foldedToBetPost = 2;
+  d.facedBet = 14; d.foldedToBet = 9;
+  const s = tr.get(1);
+  assert(Math.abs(s.foldToBetPre - 0.875) < 0.001);
+  assert(Math.abs(s.foldToBetPost - 0.3333) < 0.001);
+  assert(s.foldToBetPre > s.foldToBetPost, '두 값이 확실히 구분되어야 한다');
+});
+
+console.log('\n[에쿼티 워커 커널]');
+test('워커용 소스가 문법적으로 유효하고 동일한 결과를 낸다', function () {
+  const src = 'var makeKernel = ' + H.eval.kernelSource + ';\n' +
+    'var K = makeKernel();\n' +
+    'var makeSim = ' + H.equity.simKernel.toString() + ';\n' +
+    'var S = makeSim(K);\n' +
+    'return S;';
+  const S = new Function(src)();
+  const h = codes('As Kd'), b = codes('Ah 7c 2d');
+  const dist = EQ.boardDistribution(b, h);
+  const combos = [EQ.buildCombos({ band: RG.band(0, 0.2), keepTop: 1 }, b, h, dist)];
+  const req = {
+    hole: Int32Array.from(h), board: Int32Array.from(b), boardLen: 3,
+    combos: combos, sims: 3000, seed: 999
+  };
+  const viaWorkerSrc = S.run(req).equity;
+  const direct = EQ.vsRanges({ hole: h, board: b, combos: combos, sims: 3000, seed: 999 });
+  eq(viaWorkerSrc, direct.equity, '직렬화한 커널이 같은 결과를 내야 한다');
 });
 
 console.log('\n결과: ' + passed + ' 통과, ' + failed + ' 실패\n');

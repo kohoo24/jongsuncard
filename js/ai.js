@@ -1,177 +1,477 @@
 /*
  * ai.js - 컴퓨터 플레이어 두뇌
- * 몬테카를로 시뮬레이션으로 승률(에쿼티)을 추정하고,
- * 팟 오즈 + 성향(profile)에 따라 폴드/콜/레이즈를 결정한다.
+ *
+ * 이전 구현은 "상대는 무작위 홀카드"라는 가정 위에서 승률을 계산했다.
+ * 그 가정이 최대 23.8%p 틀린 탓에 레이즈 기준은 AA급에서만 충족되고
+ * 콜 기준은 아무 패나 통과해, 봇들이 VPIP 48~58% / PFR 0~8% 의
+ * 루즈-패시브 림퍼가 되어 있었다(단순 TAG 전략에 -149bb/100).
+ *
+ * 지금은:
+ *   1) 상대 레인지를 액션에서 역산하고 그 레인지로만 승률을 계산한다
+ *   2) 포지션별 오픈 레인지를 쓴다
+ *   3) 베팅 사이즈로 레인지를 좁힌다
+ *   4) 폴드 에쿼티를 계산해 EV 가 양수인 블러프만 한다
+ *   5) 고급 난이도에서는 상대의 실제 통계(VPIP, 폴드율)로 레인지를 보정한다
  */
 (function (global) {
   const H = global.Holdem || (global.Holdem = {});
-  if (typeof require === 'function') { require('./cards.js'); require('./evaluator.js'); }
+  if (typeof require === 'function') {
+    require('./cards.js'); require('./evaluator.js'); require('./rng.js');
+    require('./ranges.js'); require('./equity.js'); require('./stats.js');
+  }
+  const R = H.ranges, E = H.equity;
 
-  // 성향 프로필
-  const PROFILES = [
-    { key: 'rock',    name: '타이트',     aggression: 0.30, bluff: 0.03, loose: 0.75, desc: '좋은 패만 들어옵니다' },
-    { key: 'shark',   name: '밸런스',     aggression: 0.55, bluff: 0.10, loose: 1.00, desc: '기본기가 탄탄합니다' },
-    { key: 'maniac',  name: '어그레시브', aggression: 0.85, bluff: 0.22, loose: 1.25, desc: '자주 몰아붙입니다' },
-    { key: 'station', name: '콜링스테이션', aggression: 0.25, bluff: 0.05, loose: 1.45, desc: '웬만하면 콜합니다' },
-    { key: 'trap',    name: '트래퍼',     aggression: 0.45, bluff: 0.08, loose: 0.95, desc: '강한 패를 숨깁니다' }
+  /* ---------- 성향 프로필 ---------- */
+  const RAW_PROFILES = [
+    { key: 'rock',    openMult: 0.72, callMult: 0.78, bluffMult: 0.35, sizeMult: 0.95, overFold: 1.55, slowplay: 0.10 },
+    { key: 'shark',   openMult: 1.00, callMult: 1.00, bluffMult: 1.00, sizeMult: 1.00, overFold: 1.25, slowplay: 0.12 },
+    { key: 'maniac',  openMult: 1.50, callMult: 1.18, bluffMult: 2.10, sizeMult: 1.25, overFold: 0.95, slowplay: 0.05 },
+    { key: 'station', openMult: 1.35, callMult: 1.70, bluffMult: 0.30, sizeMult: 0.85, overFold: 0.65, slowplay: 0.08 },
+    { key: 'trap',    openMult: 0.88, callMult: 1.02, bluffMult: 0.70, sizeMult: 1.05, overFold: 1.30, slowplay: 0.38 }
   ];
+  const PROFILES = RAW_PROFILES.map(function (p) {
+    Object.defineProperty(p, 'name', { get: function () { return H.i18n.t('profile.' + this.key); }, enumerable: true });
+    Object.defineProperty(p, 'desc', { get: function () { return H.i18n.t('profile.' + this.key + 'Desc'); }, enumerable: true });
+    return p;
+  });
 
   const NAMES = ['민수', '지연', '태호', '수빈', '현우', '다은', '준영', '세라', '강훈', '유나'];
 
-  function keyOf(c) { return c.rank * 4 + 'shdc'.indexOf(c.suit); }
-
-  /**
-   * 몬테카를로 승률 추정
-   * @param {Array} hole   내 홀카드 2장
-   * @param {Array} board  공개된 커뮤니티 카드
-   * @param {number} opponents 상대 수
-   * @param {number} sims  시뮬레이션 횟수
-   */
-  function equity(hole, board, opponents, sims, rng) {
-    const rand = rng || Math.random;
-    if (opponents <= 0) return 1;
-
-    const used = {};
-    const known = hole.concat(board);
-    for (let i = 0; i < known.length; i++) used[keyOf(known[i])] = true;
-
-    const full = H.cards.makeDeck();
-    const deck = [];
-    for (let i = 0; i < full.length; i++) if (!used[keyOf(full[i])]) deck.push(full[i]);
-
-    const needBoard = 5 - board.length;
-    const needed = needBoard + opponents * 2;
-    let wins = 0, ties = 0;
-
-    const heroCards = new Array(7);
-    const oppCards = new Array(7);
-
-    for (let s = 0; s < sims; s++) {
-      // 필요한 만큼만 부분 셔플
-      for (let i = 0; i < needed; i++) {
-        const j = i + Math.floor(rand() * (deck.length - i));
-        const t = deck[i]; deck[i] = deck[j]; deck[j] = t;
-      }
-      let ptr = 0;
-      const fullBoard = board.slice();
-      for (let i = 0; i < needBoard; i++) fullBoard.push(deck[ptr++]);
-
-      heroCards[0] = hole[0]; heroCards[1] = hole[1];
-      for (let i = 0; i < 5; i++) heroCards[2 + i] = fullBoard[i];
-      const heroScore = H.eval.evaluate(heroCards).value;
-
-      let best = -1, tieCount = 0;
-      for (let o = 0; o < opponents; o++) {
-        oppCards[0] = deck[ptr++];
-        oppCards[1] = deck[ptr++];
-        for (let i = 0; i < 5; i++) oppCards[2 + i] = fullBoard[i];
-        const sc = H.eval.evaluate(oppCards).value;
-        if (sc > best) best = sc;
-      }
-      if (heroScore > best) wins++;
-      else if (heroScore === best) ties++;
+  /* ---------- 난이도 ---------- */
+  const DIFFICULTY = {
+    easy: {
+      key: 'easy', sims: 500, useRanges: false, useProfiling: false,
+      mistakes: 0.22, bluffScale: 0.55, wideFactor: 1.55, sizeGrid: [0.75]
+    },
+    normal: {
+      key: 'normal', sims: 1400, useRanges: true, useProfiling: false,
+      mistakes: 0.05, bluffScale: 1.00, wideFactor: 1.00, sizeGrid: [0.45, 0.72, 1.10]
+    },
+    hard: {
+      key: 'hard', sims: 2800, useRanges: true, useProfiling: true,
+      mistakes: 0.00, bluffScale: 1.15, wideFactor: 0.98, sizeGrid: [0.30, 0.50, 0.75, 1.05, 1.45]
     }
-    return (wins + ties * 0.5) / sims;
+  };
+
+  /* ---------- 보조 ---------- */
+  function effectiveStack(game, player, opponents) {
+    let maxOpp = 0;
+    for (let i = 0; i < opponents.length; i++) {
+      maxOpp = Math.max(maxOpp, opponents[i].chips + opponents[i].bet);
+    }
+    return Math.min(player.chips + player.bet, maxOpp);
   }
 
-  function simCount(street, opponents) {
-    const base = street === 'preflop' ? 220 : street === 'flop' ? 260 : 320;
-    return Math.max(120, Math.round(base / Math.max(1, opponents * 0.6)));
+  function countLimpers(game) {
+    let n = 0;
+    const pre = game.handActions;
+    for (let i = 0; i < pre.length; i++) {
+      if (pre[i].street === 'preflop' && pre[i].type === 'call' && pre[i].raisesBefore <= 1) n++;
+    }
+    return n;
   }
 
-  function round2bb(x, bb) {
-    const unit = Math.max(1, Math.round(bb / 2));
-    return Math.round(x / unit) * unit;
+  /* 숏스택 푸시 레인지 */
+  function pushRange(bbLeft, pos, n) {
+    const base = Math.max(0.08, Math.min(0.90, 0.85 - bbLeft * 0.055));
+    const posMult = { BTN: 1.5, CO: 1.25, SB: 1.35, BB: 1.0, MP: 0.85, UTG: 0.7 }[pos] || 1;
+    let m = posMult;
+    if (n <= 3) m *= 1.4; else if (n <= 4) m *= 1.2;
+    return Math.min(0.95, base * m);
   }
 
-  /**
-   * 봇의 결정을 반환한다. {type:'fold'|'check'|'call'|'raise', amount?}
+  /*
+   * 레이즈에 직면했을 때의 콜 레인지.
+   * (상대 모델링용 ACTION_BANDS 를 그대로 쓰면 BB 가 85% 를 디펜스하게 되어
+   *  VPIP 가 60% 까지 치솟는다. 콜 기준은 따로 둔다.)
    */
-  function decide(game, player) {
-    const prof = player.profile || PROFILES[1];
-    const a = game.actionsFor(player);
-    const opponents = game.activePlayers().length - 1;
-    const pot = game.totalPot();
-    const toCall = a.toCall;
-    const rand = game.rng || Math.random;
+  const CALL_CAP = {
+    vsOpen:   { BB: 0.33, SB: 0.11, BTN: 0.17, CO: 0.15, MP: 0.13, UTG: 0.12 },
+    vsThree:  { BB: 0.060, SB: 0.045, BTN: 0.065, CO: 0.060, MP: 0.050, UTG: 0.045 },
+    vsFour:   { BB: 0.022, SB: 0.020, BTN: 0.024, CO: 0.022, MP: 0.020, UTG: 0.018 }
+  };
 
-    if (opponents <= 0) return { type: a.canCheck ? 'check' : 'call' };
+  function callCapFor(raises, pos) {
+    const table = raises === 2 ? CALL_CAP.vsOpen : raises === 3 ? CALL_CAP.vsThree : CALL_CAP.vsFour;
+    return table[pos] != null ? table[pos] : 0.14;
+  }
 
-    const sims = simCount(game.street, opponents);
-    let eq = equity(player.cards, game.community, opponents, sims, rand);
+  /* 이 인원수에서 기대되는 평균 VPIP (프로파일링 보정의 기준선) */
+  function expectedVpip(n) {
+    const positions = n === 2 ? ['BTN', 'BB'] : ['BTN', 'SB', 'BB', 'UTG', 'MP', 'CO'].slice(0, n);
+    let sum = 0;
+    for (let i = 0; i < positions.length; i++) sum += R.openPercent(positions[i], n);
+    return Math.max(0.12, Math.min(0.6, (sum / positions.length) * 1.15));
+  }
 
-    // 성향 보정 + 약간의 노이즈(예측 불가능성)
-    const noise = (rand() - 0.5) * 0.05;
-    const eqAdj = Math.max(0, Math.min(1, eq + noise + (prof.aggression - 0.5) * 0.04));
+  /* 베팅 사이즈(팟 대비) -> 남는 레인지 비율 */
+  function keepForRatio(r) {
+    if (r < 0.40) return 0.58;
+    if (r < 0.70) return 0.45;
+    if (r < 1.10) return 0.34;
+    return 0.26;
+  }
 
-    const potOdds = toCall > 0 ? toCall / (pot + toCall) : 0;
-    const stack = player.chips;
-    const commitRatio = toCall / Math.max(1, stack + toCall);
+  /*
+   * 상대가 평균보다 얼마나 자주 접는가.
+   *
+   * 주의: 전체 폴드율을 쓰면 안 된다. 프리플랍에서 나쁜 패를 접는 것까지 포함되어
+   * 누구나 70% 안팎이 나오고, 봇들이 "무엇이든 접는 상대"로 오판해 블러프를
+   * 남발하게 된다(실측: 타이트한 상대에게 TAG 기준 -69 -> +231bb/100).
+   * 블러프가 통할지는 '포스트플랍 폴드율'만이 말해준다.
+   */
+  function overFoldOf(ctx, opp) {
+    if (ctx.diff.useProfiling && ctx.tracker) {
+      const st = ctx.tracker.get(opp.id);
+      if (st && st.samples.facedBetPost >= 25) {
+        const mult = st.foldToBetPost / 0.45;   // 0.45 ≈ 일반적인 포스트플랍 폴드율
+        return Math.max(0.70, Math.min(1.60, mult * 1.15));
+      }
+    }
+    return opp.profile ? opp.profile.overFold : 1.25;
+  }
 
-    // 레이즈/벳 기준선
-    const raiseLine = 0.62 - (prof.aggression - 0.5) * 0.18;
-    const bluffing = rand() < prof.bluff && opponents <= 2 && eqAdj < 0.42;
+  /* ---------- 상대 레인지 역산 ---------- */
+  function inferRange(ctx, opp) {
+    const game = ctx.game;
+    const n = game.players.length;
+    const pos = R.positionOf(game.players.indexOf(opp), game.button, n);
+    let openPct = R.openPercent(pos, n);
 
-    function makeRaise(sizePct) {
-      const target = Math.max(
-        a.minRaiseTo,
-        round2bb(game.currentBet + (pot + toCall) * sizePct, game.bigBlind)
-      );
-      let amount = Math.min(target, a.maxRaiseTo);
-      // 스택의 대부분을 넣을 거면 그냥 올인
-      if (amount > player.bet + stack * 0.75) amount = a.maxRaiseTo;
-      return { type: 'raise', amount: amount, equity: eq };
+    if (ctx.diff.useProfiling && ctx.tracker) {
+      const st = ctx.tracker.get(opp.id);
+      if (st && st.hands >= 25) {
+        // 기준선은 이론값이 아니라 이 테이블에서 실제로 관측된 평균을 쓴다
+        const baseline = ctx.tracker.populationVpip(opp.id) || expectedVpip(n);
+        openPct *= Math.max(0.65, Math.min(1.70, st.vpip / baseline));
+      }
     }
 
-    /* --- 체크 가능한 상황 --- */
+    let band;
+    if (!ctx.diff.useRanges) {
+      band = R.band(0, 1);
+    } else {
+      const pre = game.actionsOf(opp.id, 'preflop');
+      const B = R.ACTION_BANDS;
+      if (!pre.length) {
+        band = R.band(0, Math.min(1, openPct * 2.2));
+      } else {
+        let raises = 0, called = false, facedRaise = false;
+        for (let i = 0; i < pre.length; i++) {
+          const act = pre[i];
+          if (act.type === 'raise') raises++;
+          else if (act.type === 'call') called = true;
+          if (act.raisesBefore >= 2) facedRaise = true;
+        }
+        if (raises >= 2) band = B.fourBet();
+        else if (raises === 1 && facedRaise) band = B.threeBet();
+        else if (raises === 1) band = B.open(openPct);
+        else if (called && facedRaise) band = B.callThree();
+        else if (called) band = pos === 'BB' ? B.defendBB(openPct) : B.call(openPct);
+        else band = B.limp(openPct);
+      }
+    }
+
+    let keepTop = 1;
+    if (ctx.diff.useRanges) {
+      const acts = game.handActions;
+      for (let i = 0; i < acts.length; i++) {
+        const act = acts[i];
+        if (act.playerId !== opp.id || act.street === 'preflop') continue;
+        if (act.type === 'raise') {
+          const ratio = act.potBefore > 0 ? (act.amount - act.currentBetBefore) / act.potBefore : 1;
+          const k = act.raisesBefore > 0 ? 0.20 : keepForRatio(ratio);
+          keepTop = Math.min(keepTop, k);
+        } else if (act.type === 'call') {
+          keepTop = Math.min(keepTop, 0.62);
+        }
+      }
+    }
+    return { band: band, keepTop: keepTop, pos: pos, id: opp.id };
+  }
+
+  /* ---------- 레이즈 금액 정리 ---------- */
+  function raiseTo(ctx, target) {
+    const a = ctx.a, game = ctx.game;
+    const unit = Math.max(1, Math.round(game.bigBlind / 2));
+    let v = Math.round(target / unit) * unit;
+    v = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, v));
+    // 스택 대부분을 넣게 되면 그냥 올인
+    if (v > ctx.player.bet + ctx.player.chips * 0.78) v = a.maxRaiseTo;
+    return { type: 'raise', amount: v };
+  }
+
+  /* ---------- 프리플랍 ---------- */
+  function preflop(ctx) {
+    const game = ctx.game, player = ctx.player, a = ctx.a, prof = ctx.prof, diff = ctx.diff, rand = ctx.rand;
+    const myPct = R.percentile(R.classOf(player.cards[0], player.cards[1]));
+    const bb = game.bigBlind;
+    const pot = ctx.pot;
+    const openPct = Math.min(0.95, R.openPercent(ctx.pos, ctx.n) * prof.openMult * diff.wideFactor);
+    const bbLeft = effectiveStack(game, player, ctx.opponents) / bb;
+    const raises = game.raisesThisStreet;
+    const potOdds = a.toCall > 0 ? a.toCall / (pot + a.toCall) : 0;
+
+    ctx.think.handPct = myPct;
+    ctx.think.openPct = openPct;
+    ctx.think.potOdds = potOdds;
+
+    /* 숏스택: 푸시 오어 폴드 */
+    if (bbLeft <= 12 && a.canRaise) {
+      const push = pushRange(bbLeft, ctx.pos, ctx.n) * prof.openMult;
+      ctx.think.plan = 'push';
+      ctx.think.pushPct = push;
+      if (myPct <= push) return { type: 'raise', amount: a.maxRaiseTo };
+      if (a.canCheck) return { type: 'check' };
+      if (myPct <= push * 1.7 && a.toCall <= bb * 1.5) return { type: 'call' };
+      return { type: 'fold' };
+    }
+
+    /* 아직 아무도 레이즈하지 않음 */
+    if (raises <= 1) {
+      if (myPct <= openPct) {
+        const limpers = countLimpers(game);
+        ctx.think.plan = 'open';
+        return raiseTo(ctx, bb * (2.2 + 0.9 * limpers) * prof.sizeMult + (game.currentBet - bb));
+      }
+      if (a.canCheck) { ctx.think.plan = 'check'; return { type: 'check' }; }
+      if (a.toCall <= bb && myPct <= openPct * 1.9 && rand() < prof.callMult * 0.22) {
+        ctx.think.plan = 'limp';
+        return { type: 'call' };
+      }
+      ctx.think.plan = 'fold';
+      return { type: 'fold' };
+    }
+
+    /* 레이즈에 직면 */
+    const threeBetSpot = raises === 2;
+    const valueRe = (threeBetSpot ? 0.055 : 0.026) * (1 + (prof.bluffMult - 1) * 0.2);
+    const bluffReHi = threeBetSpot ? 0.055 + 0.050 * prof.bluffMult * diff.bluffScale : 0;
+    let callCap = callCapFor(raises, ctx.pos) * prof.callMult * diff.wideFactor;
+    if (potOdds < 0.18) callCap *= 1.35;       // 아주 싼 콜이면 넓힌다
+    else if (potOdds > 0.38) callCap *= 0.70;  // 비싸면 좁힌다
+    callCap = Math.min(0.60, callCap);
+    ctx.think.callCap = callCap;
+
+    if (a.canRaise && myPct <= valueRe) {
+      ctx.think.plan = threeBetSpot ? '3bet-value' : '4bet-value';
+      return raiseTo(ctx, game.currentBet * 3 + pot * 0.12);
+    }
+    if (a.canRaise && myPct > callCap && myPct <= bluffReHi && rand() < 0.4 * prof.bluffMult * diff.bluffScale) {
+      ctx.think.plan = '3bet-bluff';
+      return raiseTo(ctx, game.currentBet * 2.8);
+    }
+    if (myPct <= callCap) { ctx.think.plan = 'call'; return { type: 'call' }; }
+    if (a.canCheck) { ctx.think.plan = 'check'; return { type: 'check' }; }
+    ctx.think.plan = 'fold';
+    return { type: 'fold' };
+  }
+
+  /* ---------- 포스트플랍 ---------- */
+  function postflop(ctx) {
+    const game = ctx.game, player = ctx.player, a = ctx.a, prof = ctx.prof, diff = ctx.diff, rand = ctx.rand;
+    const pot = ctx.pot, toCall = a.toCall;
+
+    const holeCodes = [H.cards.code(player.cards[0]), H.cards.code(player.cards[1])];
+    const boardCodes = game.community.map(H.cards.code);
+    const dist = E.boardDistribution(boardCodes, holeCodes);
+
+    const ranges = ctx.opponents.map(function (o) { return inferRange(ctx, o); });
+    const combos = ranges.map(function (r) { return E.buildCombos(r, boardCodes, holeCodes, dist); });
+    const seed = (rand() * 4294967295) >>> 0;
+    const eq = E.vsRanges({
+      hole: holeCodes, board: boardCodes, combos: combos, sims: diff.sims, seed: seed
+    }).equity;
+
+    const myValue = H.eval.score(player.cards.concat(game.community));
+    const topPct = E.pctOfValue(dist, myValue);
+
+    ctx.think.equity = eq;
+    ctx.think.topPct = topPct;
+    ctx.think.rangeHi = ranges[0] ? ranges[0].band.hi : 1;
+    ctx.think.potOdds = toCall > 0 ? toCall / (pot + toCall) : 0;
+
+    /* 에쿼티 실현율: 포지션이 나쁘면 끝까지 가기 어렵다 */
+    const inPos = isInPosition(ctx);
+    const rz = game.street === 'river' ? 1 : (inPos ? 0.90 : 0.80);
+    ctx.think.inPosition = inPos;
+
+    const candidates = [];
     if (a.canCheck) {
-      if (!a.canRaise) return { type: 'check', equity: eq };
-      if (eqAdj > raiseLine + 0.12 && rand() < 0.85) {
-        // 트래퍼는 가끔 슬로우 플레이
-        if (prof.key === 'trap' && eqAdj > 0.8 && rand() < 0.4) return { type: 'check', equity: eq };
-        return makeRaise(0.55 + prof.aggression * 0.3);
-      }
-      if (eqAdj > raiseLine && rand() < 0.5) return makeRaise(0.45 + prof.aggression * 0.25);
-      if (bluffing) return makeRaise(0.4 + prof.aggression * 0.3);
-      return { type: 'check', equity: eq };
+      candidates.push({ type: 'check', ev: eq * pot * rz, tag: 'check' });
+    } else {
+      candidates.push({ type: 'fold', ev: 0, tag: 'fold' });
+      candidates.push({ type: 'call', ev: eq * pot * rz - (1 - eq) * toCall, tag: 'call' });
     }
 
-    /* --- 콜/레이즈/폴드 --- */
-    const callThreshold = potOdds * (1.05 - (prof.loose - 1) * 0.35);
+    /* 후보 베팅 사이즈들의 EV 를 비교한다 */
+    if (a.canRaise) {
+      const targets = [];
+      (diff.sizeGrid || [0.45, 0.72, 1.10]).forEach(function (f) {
+        const t = game.currentBet + Math.round((pot + toCall) * f * prof.sizeMult);
+        const c = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, t));
+        if (targets.indexOf(c) === -1) targets.push(c);
+      });
+      if (targets.indexOf(a.maxRaiseTo) === -1 && a.maxRaiseTo <= pot * 2.2) targets.push(a.maxRaiseTo);
 
-    // 아주 강할 때는 레이즈
-    if (a.canRaise && eqAdj > raiseLine + 0.15 && rand() < 0.75) {
-      return makeRaise(0.6 + prof.aggression * 0.35);
-    }
-    if (a.canRaise && eqAdj > raiseLine && rand() < 0.35 * (0.5 + prof.aggression)) {
-      return makeRaise(0.5 + prof.aggression * 0.3);
-    }
-    // 세미 블러프 / 순수 블러프 레이즈
-    if (a.canRaise && bluffing && commitRatio < 0.5 && rand() < 0.5) {
-      return makeRaise(0.55);
+      targets.forEach(function (target) {
+        const myCost = target - player.bet;
+        const theirCall = target - game.currentBet;
+        if (theirCall <= 0) return;
+
+        let pFoldAll = 1, expCallers = 0;
+        const callRanges = [];
+        for (let i = 0; i < ranges.length; i++) {
+          const pf = E.foldProbability(pot, theirCall, ranges[i], overFoldOf(ctx, ctx.opponents[i]));
+          pFoldAll *= pf;
+          expCallers += (1 - pf);
+          callRanges.push({
+            band: ranges[i].band,
+            keepTop: Math.min(ranges[i].keepTop, Math.max(0.08, 1 - pf))
+          });
+        }
+
+        /* 콜당했을 때의 승률은 따로 계산한다 (상대는 좋은 패로만 콜한다) */
+        let eqCalled = eq;
+        if (dist && pFoldAll < 0.96) {
+          const cc = callRanges.map(function (r) { return E.buildCombos(r, boardCodes, holeCodes, dist); });
+          eqCalled = E.vsRanges({
+            hole: holeCodes, board: boardCodes, combos: cc,
+            sims: Math.max(400, diff.sims >> 1), seed: seed + 1
+          }).equity;
+        }
+
+        /* (1-pFoldAll) 은 "적어도 한 명이 콜" 확률이다. 전원이 콜한다고 보면
+           이길 때 받는 팟을 과대평가하게 되므로 기대 콜러 수로 나눠 쓴다. */
+        const pCalled = 1 - pFoldAll;
+        const callers = pCalled > 0
+          ? Math.max(1, Math.min(ranges.length, expCallers / pCalled))
+          : 1;
+        const ev = pFoldAll * pot
+          + pCalled * (eqCalled * (pot + callers * theirCall) - (1 - eqCalled) * myCost);
+
+        candidates.push({
+          type: 'raise', amount: target, ev: ev,
+          tag: eqCalled >= 0.55 ? 'value' : 'bluff',
+          fe: pFoldAll, eqCalled: eqCalled
+        });
+      });
     }
 
-    if (eqAdj >= callThreshold) {
-      // 콜 비용이 스택 대부분이면 더 확실할 때만
-      if (commitRatio > 0.55 && eqAdj < 0.55 + (1 - prof.loose) * 0.1) {
-        return { type: 'fold', equity: eq };
-      }
-      return { type: 'call', equity: eq };
+    candidates.sort(function (x, y) { return y.ev - x.ev; });
+
+    /* 트래퍼: 아주 강할 때 가끔 체크로 함정 */
+    if (a.canCheck && topPct <= 0.06 && rand() < prof.slowplay) {
+      ctx.think.plan = 'slowplay';
+      return { type: 'check' };
     }
 
-    // 아주 싼 콜은 성향에 따라 받아준다
-    if (toCall <= game.bigBlind && eqAdj > potOdds * 0.72 && rand() < prof.loose * 0.55) {
-      return { type: 'call', equity: eq };
+    /*
+     * 블러프 통제: EV 추정에는 오차가 있으므로, 블러프가 최선의 비블러프 선택지를
+     * 일정 마진 이상 이길 때만 실행한다. 공격적인 성향일수록 마진이 작다.
+     */
+    const bestSolid = candidates.find(function (c) { return c.tag !== 'bluff'; }) || candidates[candidates.length - 1];
+    const margin = game.bigBlind * (0.85 / Math.max(0.3, prof.bluffMult * diff.bluffScale));
+    let pick = null;
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      if (c.tag === 'bluff' && c.ev < bestSolid.ev + margin) continue;
+      pick = c;
+      break;
     }
+    if (!pick) pick = bestSolid;
 
-    return { type: 'fold', equity: eq };
+    /* EV 가 비슷한 후보들 사이에서는 약간의 무작위성 (읽히지 않도록) */
+    const close = candidates.filter(function (c) {
+      return c.tag !== 'bluff' && c.ev > pick.ev - Math.abs(pick.ev) * 0.06 - 1;
+    });
+    if (close.length > 1 && rand() < 0.28) pick = close[(rand() * close.length) | 0];
+
+    ctx.think.plan = pick.tag;
+    ctx.think.foldEquity = pick.fe;
+    ctx.think.eqCalled = pick.eqCalled;
+    ctx.think.ev = pick.ev;
+
+    if (pick.type === 'raise') return { type: 'raise', amount: pick.amount };
+    return { type: pick.type };
+  }
+
+  function isInPosition(ctx) {
+    const game = ctx.game, n = game.players.length;
+    const me = ((game.players.indexOf(ctx.player) - game.button) % n + n) % n;
+    for (let i = 0; i < ctx.opponents.length; i++) {
+      const o = ((game.players.indexOf(ctx.opponents[i]) - game.button) % n + n) % n;
+      if (o > me) return false;   // 나보다 늦게 행동하는 상대가 있다
+    }
+    return true;
+  }
+
+  /* ---------- 초급 난이도의 의도적인 실수 ---------- */
+  function applyMistakes(ctx, d) {
+    const diff = ctx.diff, rand = ctx.rand, a = ctx.a;
+    if (!diff.mistakes || rand() >= diff.mistakes) return d;
+    ctx.think.mistake = true;
+    const roll = rand();
+    if (d.type === 'fold' && roll < 0.55) return { type: a.canCheck ? 'check' : 'call' };
+    if (d.type === 'raise' && roll < 0.5) return { type: a.canCheck ? 'check' : 'call' };
+    if ((d.type === 'check' || d.type === 'call') && roll > 0.72 && a.canRaise) {
+      return raiseTo(ctx, ctx.game.currentBet + ctx.pot * 0.6);
+    }
+    return d;
+  }
+
+  /* ---------- 진입점 ---------- */
+  function decide(game, player, opts) {
+    opts = opts || {};
+    const diff = DIFFICULTY[opts.difficulty] || DIFFICULTY.normal;
+    const prof = player.profile || PROFILES[1];
+    const rand = opts.rng || game.rng || Math.random;
+    const a = game.actionsFor(player);
+    const opponents = game.activePlayers().filter(function (p) { return p !== player; });
+
+    if (!opponents.length) return { type: a.canCheck ? 'check' : 'call', think: {} };
+
+    const ctx = {
+      game: game, player: player, opts: opts, diff: diff, prof: prof, rand: rand,
+      a: a, opponents: opponents, n: game.players.length, pot: game.totalPot(),
+      pos: R.positionOf(game.players.indexOf(player), game.button, game.players.length),
+      tracker: opts.tracker || null,
+      think: { difficulty: diff.key, profile: prof.key }
+    };
+    ctx.think.pos = ctx.pos;
+
+    let d = game.street === 'preflop' ? preflop(ctx) : postflop(ctx);
+    d = applyMistakes(ctx, d);
+
+    /* 규칙상 불가능한 액션은 안전하게 대체한다 */
+    if (d.type === 'check' && !a.canCheck) d = { type: 'fold' };
+    if (d.type === 'raise' && !a.canRaise) d = { type: a.canCheck ? 'check' : 'call' };
+    if (d.type === 'fold' && a.canCheck) d = { type: 'check' };
+
+    d.think = ctx.think;
+    return d;
+  }
+
+  /* 단순 승률 계산 (화면 표시용 호환 API) */
+  function equity(holeCards, boardCards, opponents, sims) {
+    if (opponents <= 0) return 1;
+    const hole = holeCards.map(H.cards.code);
+    const board = (boardCards || []).map(H.cards.code);
+    const dist = board.length >= 3 ? E.boardDistribution(board, hole) : null;
+    const combos = [];
+    const wide = { band: R.band(0, 1), keepTop: 1 };
+    for (let i = 0; i < opponents; i++) combos.push(E.buildCombos(wide, board, hole, dist));
+    return E.vsRanges({ hole: hole, board: board, combos: combos, sims: sims || 1000 }).equity;
   }
 
   H.ai = {
     PROFILES: PROFILES,
     NAMES: NAMES,
+    DIFFICULTY: DIFFICULTY,
+    decide: decide,
     equity: equity,
-    decide: decide
+    inferRange: inferRange,
+    pushRange: pushRange
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 

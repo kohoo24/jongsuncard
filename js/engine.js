@@ -52,6 +52,9 @@
     this.revealAll = false;
     this.log = [];
     this.results = null;
+    this.handActions = [];      // 이번 핸드의 모든 액션 (레인지 추론 / 리뷰 / 리플레이용)
+    this.raisesThisStreet = 0;
+    this.aggressor = null;
     this.rng = opts.rng || Math.random;
     this.onEvent = opts.onEvent || function () {};
   }
@@ -108,6 +111,13 @@
     return this.actor >= 0 ? this.players[this.actor] : null;
   };
 
+  /* 이번 핸드에서 특정 플레이어의 액션들 (스트리트 필터 가능) */
+  Game.prototype.actionsOf = function (playerId, street) {
+    return this.handActions.filter(function (a) {
+      return a.playerId === playerId && (!street || a.street === street);
+    });
+  };
+
   Game.prototype.actionsFor = function (player) {
     const toCall = Math.max(0, Math.min(this.currentBet - player.bet, player.chips));
     const maxRaiseTo = player.bet + player.chips;
@@ -154,6 +164,9 @@
     this.minRaise = this.bigBlind;
     this.revealAll = false;
     this.results = null;
+    this.handActions = [];
+    this.raisesThisStreet = 0;
+    this.aggressor = null;
 
     for (let i = 0; i < n; i++) {
       const p = this.players[i];
@@ -175,6 +188,7 @@
     this.putIn(bb, this.bigBlind);
     bb.lastAction = 'BB';
     this.currentBet = this.bigBlind;
+    this.raisesThisStreet = 1;   // 빅블라인드를 최초 베팅으로 취급 -> 이후 첫 레이즈가 '오픈'
     this.say(sb.name + ' 스몰블라인드 ' + Math.min(this.smallBlind, sb.totalBet), 'blind');
     this.say(bb.name + ' 빅블라인드 ' + Math.min(this.bigBlind, bb.totalBet), 'blind');
 
@@ -218,6 +232,16 @@
 
     const a = this.actionsFor(p);
     const type = action.type;
+    const snapshot = {
+      playerId: p.id,
+      street: this.street,
+      potBefore: this.totalPot(),
+      currentBetBefore: this.currentBet,
+      toCall: a.toCall,
+      raisesBefore: this.raisesThisStreet,
+      stackBefore: p.chips,
+      cards: p.cards.slice()
+    };
 
     if (type === 'fold') {
       p.folded = true;
@@ -250,6 +274,8 @@
       if (raiseBy >= this.minRaise) this.minRaise = raiseBy;
       if (p.bet > this.currentBet) {
         this.currentBet = p.bet;
+        this.raisesThisStreet++;
+        this.aggressor = p;
         // 레이즈가 나오면 나머지는 다시 액션해야 한다
         for (let i = 0; i < this.players.length; i++) {
           const o = this.players[i];
@@ -264,7 +290,14 @@
       return { ok: false, error: '알 수 없는 액션: ' + type };
     }
 
-    this.emit('action', { player: p, type: type });
+    snapshot.type = type === 'bet' || type === 'allin' ? 'raise' : type;
+    snapshot.amount = type === 'fold' || type === 'check' ? 0 : p.bet;
+    snapshot.paid = snapshot.stackBefore - p.chips;
+    snapshot.allIn = p.allIn;
+    snapshot.think = action.think || null;
+    this.handActions.push(snapshot);
+
+    this.emit('action', { player: p, type: type, record: snapshot });
     this.advance();
     this.emit('state', {});
     return { ok: true };
@@ -314,6 +347,8 @@
     this.currentBet = 0;
     this.minRaise = this.bigBlind;
     this.actor = -1;
+    this.raisesThisStreet = 0;
+    this.aggressor = null;
 
     if (this.livePlayers().length < 2 && this.activePlayers().length > 1) this.revealAll = true;
 

@@ -297,7 +297,12 @@
     return str;
   }
 
+  function extend(more) {
+    Object.keys(more).forEach(function (k) { S[k] = more[k]; });
+  }
+
   H.i18n = {
+    extend: extend,
     LANGS: LANGS,
     LANG_NAMES: LANG_NAMES,
     t: t,
@@ -310,3 +315,21 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
 if (typeof module !== 'undefined' && module.exports) module.exports = globalThis.Holdem;
+
+/* 성향 프로필 이름 (ranges/ai 에서 사용) */
+(function (global) {
+  const H = global.Holdem;
+  const extra = {
+    'profile.rock': ['타이트', 'The Rock'],
+    'profile.rockDesc': ['좋은 패만 들어옵니다', 'Plays only premium hands'],
+    'profile.shark': ['밸런스', 'The Shark'],
+    'profile.sharkDesc': ['기본기가 탄탄합니다', 'Solid, balanced play'],
+    'profile.maniac': ['어그레시브', 'The Maniac'],
+    'profile.maniacDesc': ['자주 몰아붙입니다', 'Applies constant pressure'],
+    'profile.station': ['콜링스테이션', 'The Station'],
+    'profile.stationDesc': ['웬만하면 콜합니다', 'Calls far too often'],
+    'profile.trap': ['트래퍼', 'The Trapper'],
+    'profile.trapDesc': ['강한 패를 숨깁니다', 'Slow-plays big hands']
+  };
+  H.i18n.extend(extra);
+})(typeof globalThis !== 'undefined' ? globalThis : this);
