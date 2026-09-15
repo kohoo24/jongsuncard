@@ -3,144 +3,153 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>텍사스 홀덤 - 싱글 플레이</title>
+<meta name="theme-color" content="#0b1310">
+<meta name="description" content="AI 상대와 혼자 즐기는 노리밋 텍사스 홀덤">
+<title>텍사스 홀덤</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>♠</text></svg>">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-<div id="app">
+<div id="app" data-four-color="false">
   <header class="topbar">
-    <div class="brand"><span class="pip">&spades;</span> 텍사스 홀덤</div>
-    <div class="meta">
-      <span>핸드 <b id="handNo">-</b></span>
-      <span class="sep">·</span>
-      <span>블라인드 <b id="blinds">-</b></span>
-      <span class="sep">·</span>
-      <span>내 칩 <b id="heroChips">-</b></span>
-    </div>
+    <div class="brand"><span class="pip">&spades;</span> <span data-i18n="app.title">텍사스 홀덤</span></div>
+    <div class="meta" id="topMeta"></div>
     <div class="topbtns">
-      <button class="ghost" id="btnSound" title="소리 켜기/끄기">&#128266;</button>
-      <button class="ghost" id="btnLogToggle">기록</button>
-      <button class="ghost" id="btnRestart">새 게임</button>
+      <button class="ghost" id="btnSound" aria-pressed="true" title="소리">&#128266;</button>
+      <button class="ghost" id="btnPanel" aria-expanded="true" data-i18n="top.log">기록</button>
+      <button class="ghost" id="btnMenu" data-i18n="top.newGame">새 게임</button>
     </div>
   </header>
 
   <main class="stage">
     <div class="felt" id="felt">
       <div class="table-center">
-        <div class="pot-badge">팟 <b id="potAmt">0</b></div>
-        <div class="community" id="community"></div>
+        <div class="pots" id="pots" aria-live="polite"></div>
+        <div class="community" id="community" role="list" aria-label="커뮤니티 카드"></div>
         <div class="street-label" id="streetLabel"></div>
       </div>
       <div class="seats" id="seats"></div>
-      <div class="result-banner" id="resultBanner"></div>
+      <div class="chip-layer" id="chipLayer" aria-hidden="true"></div>
+      <div class="result-banner" id="resultBanner" role="status"></div>
     </div>
 
-    <aside class="logpanel" id="logPanel">
-      <h3>핸드 기록</h3>
-      <div class="loglist" id="logList"></div>
+    <aside class="side" id="sidePanel" aria-label="정보 패널">
+      <nav class="tabs" role="tablist">
+        <button class="tab on" data-tab="log" role="tab" aria-selected="true" data-i18n="tab.log">기록</button>
+        <button class="tab" data-tab="stats" role="tab" aria-selected="false" data-i18n="tab.stats">통계</button>
+        <button class="tab" data-tab="hist" role="tab" aria-selected="false" data-i18n="tab.hist">히스토리</button>
+        <button class="tab" data-tab="chart" role="tab" aria-selected="false" data-i18n="tab.chart">차트</button>
+      </nav>
+      <div class="tab-body" id="tabBody" role="tabpanel" aria-live="polite"></div>
     </aside>
   </main>
 
-  <section class="controls" id="controls">
-    <div class="hero-readout">
-      <span id="heroHand" class="hero-hand"></span>
-      <span id="heroEquity" class="hero-equity"></span>
-    </div>
+  <section class="controls">
+    <div class="hero-readout" id="heroReadout"></div>
 
     <div class="action-area">
       <div class="btn-row" id="btnRow">
-        <button class="act danger" id="btnFold">폴드 <kbd>F</kbd></button>
-        <button class="act" id="btnCall">체크 <kbd>C</kbd></button>
-        <button class="act gold" id="btnRaise">레이즈 <kbd>R</kbd></button>
+        <button class="act danger" id="btnFold"><span></span><kbd>F</kbd></button>
+        <button class="act" id="btnCall"><span></span><kbd>C</kbd></button>
+        <button class="act gold" id="btnRaise"><span></span><kbd>R</kbd></button>
       </div>
 
       <div class="raise-row" id="raiseRow">
-        <input type="range" id="raiseSlider" min="0" max="100" value="0">
-        <div class="presets">
-          <button data-pct="0.5">&frac12; 팟</button>
-          <button data-pct="0.75">&frac34; 팟</button>
-          <button data-pct="1">팟</button>
-          <button data-pct="allin">올인</button>
+        <input type="range" id="raiseSlider" aria-label="레이즈 금액">
+        <div class="presets" id="presets">
+          <button data-pct="min" data-i18n="ctl.min">최소</button>
+          <button data-pct="0.5">&frac12;</button>
+          <button data-pct="0.75">&frac34;</button>
+          <button data-pct="1" data-i18n="ctl.pot">팟</button>
+          <button data-pct="allin" data-i18n="act.allin">올인</button>
         </div>
       </div>
 
-      <div class="waiting" id="waiting"></div>
-      <button class="act next" id="btnNext">다음 핸드 <kbd>Space</kbd></button>
+      <div class="btn-row" id="showRow">
+        <button class="act" id="btnShow" data-i18n="ctl.showCards">카드 공개</button>
+        <button class="act" id="btnMuck" data-i18n="ctl.muckCards">머크</button>
+      </div>
+
+      <div class="waiting" id="waiting" aria-live="polite"></div>
+      <div class="btn-row" id="nextRow">
+        <button class="act ghost-btn" id="btnReview" data-i18n="review.title">핸드 리뷰</button>
+        <button class="act next" id="btnNext"><span data-i18n="ctl.nextHand">다음 핸드</span><kbd>Space</kbd></button>
+      </div>
     </div>
   </section>
 </div>
 
-<!-- 시작 / 설정 화면 -->
-<div class="modal" id="setupModal">
-  <div class="modal-box">
-    <h2><span class="pip">&spades;</span> 텍사스 홀덤</h2>
-    <p class="sub">AI 상대와 1:N 으로 즐기는 노리밋 홀덤</p>
+<!-- 설정 -->
+<div class="modal" id="setupModal" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
+  <div class="modal-box wide">
+    <h2 id="setupTitle"><span class="pip">&spades;</span> <span data-i18n="app.title">텍사스 홀덤</span></h2>
+    <p class="sub" data-i18n="app.subtitle"></p>
 
-    <label class="field">
-      <span>상대 수</span>
-      <select id="optBots">
-        <option value="1">1명 (헤즈업)</option>
-        <option value="2">2명</option>
-        <option value="3" selected>3명</option>
-        <option value="4">4명</option>
-        <option value="5">5명</option>
-      </select>
-    </label>
+    <div class="field-grid">
+      <label class="field"><span data-i18n="setup.opponents"></span>
+        <select id="optBots"></select></label>
+      <label class="field"><span data-i18n="setup.difficulty"></span>
+        <select id="optDifficulty"></select></label>
+      <label class="field"><span data-i18n="setup.startChips"></span>
+        <select id="optChips"></select></label>
+      <label class="field"><span data-i18n="setup.blinds"></span>
+        <select id="optBlinds"></select></label>
+      <label class="field"><span data-i18n="setup.structure"></span>
+        <select id="optStructure"></select></label>
+      <label class="field"><span data-i18n="setup.ante"></span>
+        <select id="optAnte"></select></label>
+      <label class="field"><span data-i18n="setup.speed"></span>
+        <select id="optSpeed"></select></label>
+      <label class="field"><span data-i18n="setup.clock"></span>
+        <select id="optClock"></select></label>
+      <label class="field"><span data-i18n="setup.language"></span>
+        <select id="optLang"></select></label>
+      <label class="field"><span data-i18n="setup.seed"></span>
+        <input type="text" id="optSeed" placeholder="—" maxlength="10"></label>
+    </div>
+    <p class="hint" data-i18n="setup.seedHint"></p>
 
-    <label class="field">
-      <span>시작 칩</span>
-      <select id="optChips">
-        <option value="500">500 (25 BB)</option>
-        <option value="1000" selected>1,000 (50 BB)</option>
-        <option value="2000">2,000 (100 BB)</option>
-        <option value="5000">5,000 (250 BB)</option>
-      </select>
-    </label>
+    <div class="check-grid">
+      <label class="field check"><input type="checkbox" id="optEquity"><span data-i18n="setup.showEquity"></span></label>
+      <label class="field check"><input type="checkbox" id="optThinking"><span data-i18n="setup.showThinking"></span></label>
+      <label class="field check"><input type="checkbox" id="optReview"><span data-i18n="setup.autoReview"></span></label>
+      <label class="field check"><input type="checkbox" id="optFourColor"><span data-i18n="setup.fourColor"></span></label>
+      <label class="field check"><input type="checkbox" id="optRebuy"><span data-i18n="setup.rebuy"></span></label>
+    </div>
 
-    <label class="field">
-      <span>블라인드</span>
-      <select id="optBlinds">
-        <option value="5">5 / 10</option>
-        <option value="10" selected>10 / 20</option>
-        <option value="25">25 / 50</option>
-      </select>
-    </label>
-
-    <label class="field">
-      <span>블라인드 상승</span>
-      <select id="optBlindUp">
-        <option value="0" selected>없음</option>
-        <option value="10">10핸드마다 2배</option>
-        <option value="20">20핸드마다 2배</option>
-      </select>
-    </label>
-
-    <label class="field">
-      <span>AI 속도</span>
-      <select id="optSpeed">
-        <option value="350">빠름</option>
-        <option value="750" selected>보통</option>
-        <option value="1300">느긋함</option>
-      </select>
-    </label>
-
-    <label class="field check">
-      <input type="checkbox" id="optEquity" checked>
-      <span>내 승률(에쿼티) 표시</span>
-    </label>
-
-    <button class="act gold big" id="btnStart">게임 시작</button>
-    <p class="hint">단축키 &mdash; F: 폴드 / C: 체크·콜 / R: 레이즈 / Space: 다음 핸드</p>
+    <button class="act gold big" id="btnStart" data-i18n="setup.start">게임 시작</button>
+    <button class="act ghost-btn small" id="btnResume" hidden>이어하기</button>
+    <p class="hint" data-i18n="setup.shortcuts"></p>
   </div>
 </div>
 
 <!-- 게임 종료 -->
-<div class="modal" id="overModal">
+<div class="modal" id="overModal" role="dialog" aria-modal="true" aria-labelledby="overTitle">
   <div class="modal-box">
-    <h2 id="overTitle">게임 종료</h2>
+    <h2 id="overTitle"></h2>
     <p class="sub" id="overText"></p>
-    <button class="act gold big" id="btnOverRestart">다시 시작</button>
+    <div id="overStats"></div>
+    <button class="act gold big" id="btnOverRestart" data-i18n="over.restart">다시 시작</button>
+    <button class="act big" id="btnRebuy" hidden></button>
+  </div>
+</div>
+
+<!-- 핸드 리뷰 -->
+<div class="modal" id="reviewModal" role="dialog" aria-modal="true" aria-labelledby="reviewTitle">
+  <div class="modal-box wide">
+    <h2 id="reviewTitle" data-i18n="review.title">핸드 리뷰</h2>
+    <div id="reviewBody" class="scroll-body"></div>
+    <button class="act big" id="btnReviewClose" data-i18n="common.close">닫기</button>
+  </div>
+</div>
+
+<!-- 리플레이 -->
+<div class="modal" id="replayModal" role="dialog" aria-modal="true" aria-labelledby="replayTitle">
+  <div class="modal-box wide">
+    <div id="replayBody" class="scroll-body"></div>
+    <button class="act big" id="btnReplayClose" data-i18n="hist.close">닫기</button>
   </div>
 </div>
 
@@ -156,6 +165,8 @@
 <script src="js/ai.js"></script>
 <script src="js/review.js"></script>
 <script src="js/history.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/panels.js"></script>
 <script src="js/ui.js"></script>
 </body>
 </html>

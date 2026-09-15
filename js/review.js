@@ -89,6 +89,8 @@
       handNo: game.handNo,
       street: game.street,
       position: o.position,
+      handPct: o.handPct,
+      raisesBefore: game.raisesThisStreet,
       pot: game.totalPot(),
       toCall: o.context.a.toCall,
       board: game.community.slice(),
@@ -115,6 +117,22 @@
   function explain(item) {
     const eqPct = Math.round(item.equity * 100);
     const needPct = Math.round(item.potOdds * 100);
+
+    /* 프리플랍은 승률보다 "이 핸드가 이 포지션의 레인지에 드는가"로 설명해야 읽힌다 */
+    if (item.street === 'preflop' && item.handPct != null) {
+      const top = item.handPct < 0.1 ? item.handPct * 100 < 1
+        ? (item.handPct * 100).toFixed(1) : Math.round(item.handPct * 100)
+        : Math.round(item.handPct * 100);
+      const pos = T('pos.' + item.position);
+      if (item.best.type === 'raise') {
+        return item.raisesBefore >= 2
+          ? T('review.shouldThreeBet', { pct: top })
+          : T('review.shouldOpen', { pct: top, pos: pos });
+      }
+      if (item.best.type === 'fold') return T('review.shouldFoldPre', { pct: top, pos: pos });
+      if (item.best.type === 'call') return T('review.shouldCallPre', { pct: top, need: needPct });
+    }
+
     if (item.best.type === 'raise') return T('review.shouldBet', { eq: eqPct });
     if (item.toCall > 0) {
       return item.best.type === 'fold'

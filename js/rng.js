@@ -5,16 +5,22 @@
 (function (global) {
   const H = global.Holdem || (global.Holdem = {});
 
-  // mulberry32: 빠르고 품질이 충분한 32비트 PRNG
+  // mulberry32: 빠르고 품질이 충분한 32비트 PRNG.
+  // .state 로 내부 상태를 읽고 되돌릴 수 있어 진행 중인 게임을 저장/복원할 수 있다.
   function create(seed) {
     let a = (seed >>> 0) || 1;
-    return function () {
+    const fn = function () {
       a = (a + 0x6D2B79F5) >>> 0;
       let t = a;
       t = Math.imul(t ^ (t >>> 15), t | 1);
       t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
+    Object.defineProperty(fn, 'state', {
+      get: function () { return a; },
+      set: function (v) { a = (v >>> 0) || 1; }
+    });
+    return fn;
   }
 
   function randomSeed() {

@@ -1,107 +1,122 @@
 /*
- * ui.js - 화면 렌더링 & 게임 루프
+ * ui.js - 화면 렌더링과 게임 루프
  */
 (function (global) {
   const H = global.Holdem;
+  const T = function (k, p) { return H.i18n.t(k, p); };
   const $ = function (id) { return document.getElementById(id); };
-
   const HERO_ID = 0;
 
   const SEAT_POS = {
     2: [[50, 86], [50, 16]],
-    3: [[50, 86], [12, 34], [88, 34]],
-    4: [[50, 86], [9, 52], [50, 16], [91, 52]],
-    5: [[50, 86], [7, 56], [24, 18], [76, 18], [93, 56]],
-    6: [[50, 86], [7, 58], [16, 22], [50, 15], [84, 22], [93, 58]]
+    3: [[50, 86], [14, 34], [86, 34]],
+    4: [[50, 86], [11, 52], [50, 16], [89, 52]],
+    5: [[50, 86], [10, 56], [25, 18], [75, 18], [90, 56]],
+    6: [[50, 86], [10, 58], [18, 22], [50, 15], [82, 22], [90, 58]]
   };
+  /* 좁은 화면에서는 측면 좌석의 카드가 커뮤니티 카드와 겹치므로 위아래로 더 벌린다 */
+  const SEAT_POS_NARROW = {
+    2: [[50, 88], [50, 14]],
+    3: [[50, 88], [16, 26], [84, 26]],
+    4: [[50, 88], [15, 62], [50, 13], [85, 62]],
+    5: [[50, 88], [14, 64], [24, 14], [76, 14], [86, 64]],
+    6: [[50, 88], [13, 66], [17, 20], [50, 11], [83, 20], [87, 66]]
+  };
+
+  const AVATARS = ['🦅', '🦊', '🐺', '🐱', '🐸', '🦉', '🐻', '🦌'];
 
   const state = {
-    game: null,
-    opts: null,
-    seatEls: {},
-    seatOrder: [],
-    communityRendered: 0,
-    timer: null,
-    heroEquity: null,
-    equityToken: 0,
-    sound: true
+    game: null, tracker: null, recorder: null, settings: null,
+    seatEls: {}, communityRendered: 0, timer: null, clockTimer: null,
+    heroInfo: null, drawInfo: null, reviewItems: [], lastSummary: null, handFinalized: false,
+    tab: 'log', chartState: { position: 'BTN', playerCount: 6, heroKey: null },
+    sound: true, winningCards: [], busy: false
   };
+  global.HoldemUI = state;
 
-  /* ---------------- 사운드 ---------------- */
+  /* ==================== 사운드 ==================== */
   let audioCtx = null;
-  function beep(freq, dur, vol) {
+  function tone(freq, dur, vol, type) {
     if (!state.sound) return;
     try {
       if (!audioCtx) audioCtx = new (global.AudioContext || global.webkitAudioContext)();
       const t = audioCtx.currentTime;
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
-      osc.type = 'triangle';
+      osc.type = type || 'triangle';
       osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(vol || 0.05, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(vol || 0.05, t + 0.012);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + (dur || 0.09));
       osc.connect(gain).connect(audioCtx.destination);
-      osc.start(t);
-      osc.stop(t + (dur || 0.09) + 0.02);
-    } catch (e) { /* 오디오 미지원 무시 */ }
+      osc.start(t); osc.stop(t + (dur || 0.09) + 0.02);
+    } catch (e) { /* 오디오 미지원 */ }
   }
   const SFX = {
-    card: function () { beep(880, 0.05, 0.03); },
-    chip: function () { beep(520, 0.07, 0.04); },
-    raise: function () { beep(680, 0.11, 0.05); },
-    fold: function () { beep(220, 0.10, 0.035); },
-    win: function () { beep(660, 0.12, 0.06); setTimeout(function () { beep(880, 0.16, 0.06); }, 110); }
+    card: function () { tone(900, 0.05, 0.028); },
+    chip: function () { tone(520, 0.07, 0.04); },
+    raise: function () { tone(680, 0.10, 0.05); setTimeout(function () { tone(820, 0.08, 0.04); }, 60); },
+    fold: function () { tone(210, 0.10, 0.03); },
+    check: function () { tone(400, 0.05, 0.025); },
+    allin: function () { tone(520, 0.1, 0.06); setTimeout(function () { tone(700, 0.1, 0.06); }, 80); setTimeout(function () { tone(900, 0.16, 0.06); }, 160); },
+    win: function () { tone(660, 0.12, 0.06); setTimeout(function () { tone(880, 0.18, 0.06); }, 110); },
+    lose: function () { tone(300, 0.2, 0.04, 'sine'); },
+    tick: function () { tone(1200, 0.03, 0.02); }
   };
+  function buzz(ms) {
+    try { if (global.navigator && navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* 무시 */ }
+  }
 
-  /* ---------------- 카드 렌더 ---------------- */
+  /* ==================== 카드 ==================== */
   function cardEl(card, opts) {
     opts = opts || {};
-    const el = document.createElement('div');
-    el.className = 'card' + (opts.small ? ' small' : '');
-    if (!card) {
-      el.classList.add('back');
-      return el;
-    }
-    if (H.cards.isRed(card)) el.classList.add('red');
+    const e = document.createElement('div');
+    e.className = 'card' + (opts.small ? ' small' : '');
+    if (!card) { e.classList.add('back'); e.setAttribute('aria-label', '뒷면'); return e; }
+    e.dataset.suit = card.suit;
+    if (H.cards.isRed(card)) e.classList.add('red');
     const r = document.createElement('div');
     r.className = 'r';
     r.textContent = H.cards.RANK_LABEL[card.rank];
     const s = document.createElement('div');
     s.className = 's';
     s.textContent = H.cards.SUIT_LABEL[card.suit];
-    el.appendChild(r);
-    el.appendChild(s);
-    return el;
+    e.appendChild(r); e.appendChild(s);
+    e.setAttribute('role', 'listitem');
+    e.setAttribute('aria-label', H.cards.RANK_LABEL[card.rank] + ' ' + H.cards.SUIT_LABEL[card.suit]);
+    return e;
   }
-
-  function cardsSignature(cards, hidden) {
+  function cardKey(c) { return c ? H.cards.cardToString(c) : ''; }
+  function sig(cards, hidden) {
     if (!cards.length) return 'none';
-    if (hidden) return 'back:' + cards.length;
-    return cards.map(H.cards.cardToString).join(',');
+    return (hidden ? 'back:' : '') + cards.map(cardKey).join(',');
   }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (m) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
+    });
+  }
+  function num(v) { return Math.round(v).toLocaleString(); }
 
-  /* ---------------- 좌석 ---------------- */
+  /* ==================== 좌석 ==================== */
   function buildSeats() {
     const g = state.game;
     const wrap = $('seats');
     wrap.innerHTML = '';
     state.seatEls = {};
-
     const n = g.players.length;
-    const pos = SEAT_POS[n] || SEAT_POS[6];
-
-    // 히어로를 0번 좌석(하단)에 두고 시계방향으로 배치
+    const narrow = global.innerWidth < 720;
+    const table = narrow ? SEAT_POS_NARROW : SEAT_POS;
+    const pos = table[n] || table[6];
     const heroIdx = g.players.findIndex(function (p) { return p.isHuman; });
     const order = [];
     for (let i = 0; i < n; i++) order.push(g.players[(heroIdx + i + n) % n]);
-    state.seatOrder = order;
+    document.getElementById('felt').classList.toggle('narrow', narrow);
 
-    const narrow = global.innerWidth < 720;
     order.forEach(function (p, i) {
-      const seat = document.createElement('div');
       const xy = pos[i] || [50, 50];
-      const x = narrow ? 50 + (xy[0] - 50) * 0.74 : xy[0];
+      const x = xy[0];
+      const seat = document.createElement('div');
       seat.className = 'seat ' + (xy[1] > 50 ? 'bottom' : 'top');
       seat.style.left = x + '%';
       seat.style.top = xy[1] + '%';
@@ -111,31 +126,38 @@
 
       const plate = document.createElement('div');
       plate.className = 'plate';
+      const ring = document.createElement('div');
+      ring.className = 'clock-ring';
+      const av = document.createElement('div');
+      av.className = 'avatar';
+      av.textContent = p.isHuman ? '😎' : AVATARS[(g.players.indexOf(p) * 3) % AVATARS.length];
+      const info = document.createElement('div');
+      info.className = 'info';
       const name = document.createElement('div');
       name.className = 'name';
       const chips = document.createElement('div');
       chips.className = 'chips';
       const last = document.createElement('div');
       last.className = 'last';
-      plate.appendChild(name);
-      plate.appendChild(chips);
-      plate.appendChild(last);
+      info.appendChild(name); info.appendChild(chips); info.appendChild(last);
+      plate.appendChild(ring); plate.appendChild(av); plate.appendChild(info);
 
       const bet = document.createElement('div');
       bet.className = 'bet hidden';
       const badge = document.createElement('div');
       badge.className = 'badge hidden';
       badge.textContent = 'D';
+      badge.title = T('table.dealerButton');
+      const think = document.createElement('div');
+      think.className = 'think hidden';
 
-      seat.appendChild(cards);
-      seat.appendChild(plate);
-      seat.appendChild(bet);
-      seat.appendChild(badge);
+      seat.appendChild(cards); seat.appendChild(plate);
+      seat.appendChild(bet); seat.appendChild(badge); seat.appendChild(think);
       wrap.appendChild(seat);
 
       state.seatEls[p.id] = {
-        root: seat, cards: cards, name: name, chips: chips,
-        last: last, bet: bet, badge: badge, sig: ''
+        root: seat, cards: cards, name: name, chips: chips, last: last,
+        bet: bet, badge: badge, think: think, ring: ring, avatar: av, sig: ''
       };
     });
   }
@@ -143,56 +165,70 @@
   function updateSeats() {
     const g = state.game;
     const actor = g.currentActor();
+    const showThink = state.settings.showThinking;
 
     g.players.forEach(function (p) {
-      const el = state.seatEls[p.id];
-      if (!el) return;
+      const e = state.seatEls[p.id];
+      if (!e) return;
+      const tag = p.isHuman ? T('table.youPlayer') : (p.profile ? p.profile.name : 'AI');
+      e.name.innerHTML = esc(p.name) + ' <span class="tag">' + esc(tag) + '</span>';
+      e.chips.textContent = num(p.chips);
 
-      const tag = p.isHuman ? '플레이어' : (p.profile ? p.profile.name : 'AI');
-      el.name.innerHTML = escapeHtml(p.name) + ' <span class="tag">' + tag + '</span>';
-      el.chips.textContent = p.chips.toLocaleString();
-      el.last.innerHTML = p.allIn && !p.folded
-        ? '<span class="allin">ALL IN</span>'
-        : escapeHtml(p.lastAction || '');
+      if (p.allIn && !p.folded) e.last.innerHTML = '<span class="allin">' + T('table.allIn') + '</span>';
+      else e.last.textContent = p.lastActionKey ? p.lastAction : '';
 
-      el.root.classList.toggle('turn', actor === p && g.phase === 'awaiting-action');
-      el.root.classList.toggle('folded', p.folded);
-      el.root.classList.toggle('winner', g.phase === 'hand-over' && p.won > 0);
+      const isTurn = actor === p && g.phase === 'awaiting-action';
+      e.root.classList.toggle('turn', isTurn);
+      e.root.classList.toggle('folded', p.folded);
+      e.root.classList.toggle('winner', g.phase === 'hand-over' && p.won > 0);
+      if (!isTurn) e.ring.style.background = '';
 
-      if (p.bet > 0) {
-        el.bet.textContent = p.bet.toLocaleString();
-        el.bet.classList.remove('hidden');
+      if (p.bet > 0) { e.bet.textContent = num(p.bet); e.bet.classList.remove('hidden'); }
+      else e.bet.classList.add('hidden');
+
+      e.badge.classList.toggle('hidden', g.players.indexOf(p) !== g.button);
+
+      /* AI 속마음 */
+      const acts = g.actionsOf(p.id);
+      const lastAct = acts[acts.length - 1];
+      if (showThink && !p.isHuman && lastAct && lastAct.think && lastAct.think.equity != null) {
+        const th = lastAct.think;
+        const bits = [T('think.equity', { eq: Math.round(th.equity * 100) })];
+        if (th.plan === 'bluff') bits.push(T('think.bluff', { fe: Math.round((th.foldEquity || 0) * 100) }));
+        else if (th.plan === 'value') bits.push(T('think.value'));
+        else if (th.plan === 'slowplay') bits.push(T('think.semiBluff'));
+        e.think.textContent = bits.join(' · ');
+        e.think.classList.remove('hidden');
       } else {
-        el.bet.classList.add('hidden');
+        e.think.classList.add('hidden');
       }
 
-      const isButton = g.players.indexOf(p) === g.button;
-      el.badge.classList.toggle('hidden', !isButton);
-
+      /* 카드 */
       const hidden = !p.isHuman && !g.revealAll;
-      const showCards = p.cards.length > 0 && (!p.folded || p.isHuman);
-      const sig = showCards ? cardsSignature(p.cards, hidden) + (p.folded ? ':f' : '') : 'empty';
-      if (sig !== el.sig) {
-        el.sig = sig;
-        el.cards.innerHTML = '';
-        if (showCards) {
+      const show = p.cards.length > 0 && (!p.folded || p.isHuman) && !(p.mucked && !p.isHuman);
+      const s = show ? sig(p.cards, hidden) + (p.folded ? ':f' : '') : 'empty';
+      if (s !== e.sig) {
+        const wasHidden = e.sig.indexOf('back:') === 0;
+        e.sig = s;
+        e.cards.innerHTML = '';
+        if (show) {
           p.cards.forEach(function (c) {
             const ce = cardEl(hidden ? null : c, { small: !p.isHuman });
             if (p.folded) ce.classList.add('dim');
-            el.cards.appendChild(ce);
+            if (wasHidden && !hidden) ce.classList.add('flip');
+            if (state.winningCards.indexOf(cardKey(c)) >= 0) ce.classList.add('win-card');
+            e.cards.appendChild(ce);
           });
         }
+      } else if (state.winningCards.length && show && !hidden) {
+        Array.prototype.forEach.call(e.cards.children, function (ce, i) {
+          ce.classList.toggle('win-card', state.winningCards.indexOf(cardKey(p.cards[i])) >= 0);
+        });
       }
     });
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (m) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
-    });
-  }
-
-  /* ---------------- 보드 / 상단 ---------------- */
+  /* ==================== 보드 / 상단 ==================== */
   function updateBoard() {
     const g = state.game;
     const wrap = $('community');
@@ -201,123 +237,156 @@
       state.communityRendered = 0;
     }
     for (let i = state.communityRendered; i < g.community.length; i++) {
-      wrap.appendChild(cardEl(g.community[i]));
+      const ce = cardEl(g.community[i]);
+      ce.style.animationDelay = ((i - state.communityRendered) * 90) + 'ms';
+      wrap.appendChild(ce);
       SFX.card();
     }
     state.communityRendered = g.community.length;
-
-    $('potAmt').textContent = g.totalPot().toLocaleString();
-    $('streetLabel').textContent = g.community.length ? H.i18n.t('street.' + g.street) : '';
-    $('handNo').textContent = '#' + g.handNo;
-    $('blinds').textContent = g.smallBlind + ' / ' + g.bigBlind;
-    const hero = g.byId(HERO_ID);
-    $('heroChips').textContent = hero ? hero.chips.toLocaleString() : '0';
-  }
-
-  function renderLog() {
-    const list = $('logList');
-    const g = state.game;
-    list.innerHTML = '';
-    const items = g.log.slice(-160);
-    items.forEach(function (e) {
-      const d = document.createElement('div');
-      d.className = 'l-' + e.kind;
-      d.textContent = e.text;
-      list.appendChild(d);
+    Array.prototype.forEach.call(wrap.children, function (ce, i) {
+      ce.classList.toggle('win-card', state.winningCards.indexOf(cardKey(g.community[i])) >= 0);
     });
-    list.scrollTop = list.scrollHeight;
+
+    /* 팟 (메인 + 사이드) */
+    const potsEl = $('pots');
+    potsEl.innerHTML = '';
+    /* 사이드 팟은 실제로 올인이 걸려 분리된 경우에만 나눠 보여준다.
+       (그냥 buildPots 를 쓰면 누가 폴드만 해도 팟이 쪼개진 것처럼 보인다) */
+    const hasAllIn = g.players.some(function (p) { return p.allIn && !p.folded; });
+    const pots = (g.totalPot() > 0 && hasAllIn) ? g.buildPots() : [];
+    if (pots.length <= 1) {
+      const b = document.createElement('div');
+      b.className = 'pot-badge';
+      b.innerHTML = T('table.pot') + ' <b>' + num(g.totalPot()) + '</b>';
+      potsEl.appendChild(b);
+    } else {
+      pots.forEach(function (p, i) {
+        const b = document.createElement('div');
+        b.className = 'pot-badge' + (i > 0 ? ' side' : '');
+        b.innerHTML = (i === 0 ? T('pot.main') : T('pot.side', { n: i })) + ' <b>' + num(p.amount) + '</b>';
+        b.title = p.eligible.map(function (id) {
+          const pl = g.byId(id); return pl ? pl.name : '';
+        }).join(', ');
+        potsEl.appendChild(b);
+      });
+    }
+
+    $('streetLabel').textContent = g.community.length ? T('street.' + g.street) : '';
+
+    /* 상단 메타 */
+    const hero = g.byId(HERO_ID);
+    const parts = [];
+    parts.push('<span>' + T('top.hand') + ' <b>#' + g.handNo + '</b></span>');
+    if (g.levelEvery) {
+      parts.push('<span>' + T('tour.level', { n: g.levelIndex + 1 }) + '</span>');
+    }
+    parts.push('<span>' + T('top.blinds') + ' <b>' + g.smallBlind + '/' + g.bigBlind +
+      (g.ante ? '+' + g.ante : '') + '</b></span>');
+    if (hero) parts.push('<span>' + T('top.myChips') + ' <b>' + num(hero.chips) + '</b></span>');
+    const nextLv = g.nextLevelIn();
+    if (nextLv != null) parts.push('<span class="dim">' + T('tour.nextLevel', { n: nextLv }) + '</span>');
+    if (g.players.length > 2) parts.push('<span class="dim">' + T('tour.remaining', { n: g.players.length }) + '</span>');
+    $('topMeta').innerHTML = parts.join('<span class="sep">·</span>');
   }
 
-  /* ---------------- 히어로 정보 ---------------- */
+  /* ==================== 히어로 정보 ==================== */
+  function refreshHeroInfo(full) {
+    const g = state.game;
+    const hero = g.byId(HERO_ID);
+    if (!hero || hero.folded || !hero.cards.length) { state.heroInfo = null; state.drawInfo = null; return; }
+    if (g.activePlayers().length < 2) { state.heroInfo = null; return; }
+    try {
+      state.heroInfo = H.ai.analyze(g, hero, { difficulty: 'hard', tracker: state.tracker });
+    } catch (e) { state.heroInfo = null; }
+    if (full && g.community.length >= 3 && g.community.length <= 4) {
+      try { state.drawInfo = H.equity.analyzeDraws(hero.cards, g.community); }
+      catch (e) { state.drawInfo = null; }
+    } else if (g.community.length > 4 || g.community.length < 3) {
+      state.drawInfo = null;
+    }
+    state.chartState.heroKey = H.ranges.classOf(hero.cards[0], hero.cards[1]);
+  }
+
   function updateHeroReadout() {
     const g = state.game;
     const hero = g.byId(HERO_ID);
-    const handEl = $('heroHand');
-    const eqEl = $('heroEquity');
+    const host = $('heroReadout');
+    host.innerHTML = '';
+    if (!hero) return;
+    if (hero.folded) { host.appendChild(chip('muted', T('table.youFolded'))); return; }
+    if (!hero.cards.length) return;
 
-    if (!hero || !hero.cards.length || hero.folded) {
-      handEl.textContent = hero && hero.folded ? '폴드' : '';
-      eqEl.textContent = '';
-      return;
-    }
+    /* 핸드 이름 */
+    let handText;
     if (g.community.length >= 3) {
-      const res = H.eval.evaluate(hero.cards.concat(g.community));
-      handEl.textContent = H.eval.describe(res);
+      handText = H.eval.describe(H.eval.evaluate(hero.cards.concat(g.community)));
     } else {
       const a = hero.cards[0], b = hero.cards[1];
       const L = H.cards.RANK_LABEL;
-      const hi = a.rank >= b.rank ? a : b;
-      const lo = a.rank >= b.rank ? b : a;
-      handEl.textContent = hi.rank === lo.rank
-        ? '포켓 페어 ' + L[hi.rank]
-        : L[hi.rank] + L[lo.rank] + (a.suit === b.suit ? ' 수딧' : ' 오프수딧');
+      const hi = a.rank >= b.rank ? a : b, lo = a.rank >= b.rank ? b : a;
+      handText = hi.rank === lo.rank
+        ? T('hole.pocket', { r: L[hi.rank] })
+        : T(a.suit === b.suit ? 'hole.suited' : 'hole.offsuit', { a: L[hi.rank], b: L[lo.rank] });
     }
+    host.appendChild(chip('hand', handText));
 
-    if (!state.opts.showEquity || g.phase === 'hand-over') {
-      eqEl.textContent = '';
-      return;
+    if (state.settings.showEquity && state.heroInfo && g.phase !== 'hand-over' && g.phase !== 'show-choice') {
+      host.appendChild(chip('equity', T('ctl.equity', { pct: Math.round(state.heroInfo.equity * 100) })));
+      if (state.heroInfo.potOdds > 0) {
+        host.appendChild(chip('odds', T('ctl.potOdds', { pct: Math.round(state.heroInfo.potOdds * 100) })));
+      }
     }
-    eqEl.textContent = state.heroEquity == null
-      ? '승률 계산 중\u2026'
-      : '예상 승률 ' + Math.round(state.heroEquity * 100) + '%';
+    if (state.drawInfo && state.drawInfo.outs > 0) {
+      host.appendChild(chip('outs', T('ctl.outs', {
+        n: state.drawInfo.outs,
+        name: state.drawInfo.labels[0] || '',
+        pct: Math.round(state.drawInfo.byRiver * 100)
+      })));
+    } else if (state.drawInfo && state.drawInfo.labels.length) {
+      host.appendChild(chip('outs', state.drawInfo.labels[0]));
+    }
+  }
+  function chip(cls, text) {
+    const s = document.createElement('span');
+    s.className = 'readout ' + cls;
+    s.textContent = text;
+    return s;
   }
 
-  function refreshEquity() {
-    if (!state.opts.showEquity) { state.heroEquity = null; return; }
-    const g = state.game;
-    const hero = g.byId(HERO_ID);
-    const opponents = g.activePlayers().length - 1;
-    if (!hero || hero.folded || !hero.cards.length || opponents < 1) {
-      state.heroEquity = null;
-      return;
-    }
-    const token = ++state.equityToken;
-    state.heroEquity = null;
-    updateHeroReadout();
-    // 계산이 UI를 막지 않도록 다음 틱에서 실행
-    setTimeout(function () {
-      if (token !== state.equityToken) return;
-      const sims = g.community.length ? 400 : 300;
-      state.heroEquity = H.ai.equity(hero.cards, g.community, opponents, sims);
-      if (token === state.equityToken) updateHeroReadout();
-    }, 0);
-  }
-
-  /* ---------------- 컨트롤 ---------------- */
-  function hide(el, v) { el.classList.toggle('hidden', v); }
+  /* ==================== 컨트롤 ==================== */
+  function hide(el, v) { el.classList.toggle('hidden', !!v); }
 
   function updateControls() {
     const g = state.game;
     const hero = g.byId(HERO_ID);
     const isHeroTurn = g.phase === 'awaiting-action' && g.currentActor() === hero;
     const handOver = g.phase === 'hand-over';
+    const showChoice = g.phase === 'show-choice' && g.showChoicePlayer && g.showChoicePlayer.isHuman;
 
     hide($('btnRow'), !isHeroTurn);
     hide($('raiseRow'), !isHeroTurn);
-    hide($('btnNext'), !handOver);
-    hide($('waiting'), isHeroTurn || handOver);
+    hide($('showRow'), !showChoice);
+    hide($('nextRow'), !handOver);
+    hide($('waiting'), isHeroTurn || handOver || showChoice);
+    hide($('btnReview'), !state.lastSummary || !state.lastSummary.items.length);
 
-    if (handOver) {
-      showBanner();
-    } else {
-      $('resultBanner').classList.remove('show');
-    }
+    if (handOver) showBanner(); else $('resultBanner').classList.remove('show');
 
     if (!isHeroTurn) {
-      if (!handOver) {
+      if (!handOver && !showChoice) {
         const actor = g.currentActor();
         $('waiting').textContent = actor
-          ? actor.name + ' 님이 생각 중…'
-          : (hero && hero.folded ? '이번 핸드는 폴드했습니다' : '카드를 여는 중…');
+          ? T('table.thinking', { name: actor.name })
+          : T('table.dealing');
       }
       return;
     }
 
     const a = g.actionsFor(hero);
-    $('btnCall').innerHTML = a.canCheck
-      ? '체크 <kbd>C</kbd>'
-      : '콜 ' + Math.min(a.toCall, hero.chips).toLocaleString() + ' <kbd>C</kbd>';
-    $('btnFold').disabled = false;
+    $('btnFold').querySelector('span').textContent = T('ctl.fold');
+    $('btnCall').querySelector('span').textContent = a.canCheck
+      ? T('ctl.check')
+      : T('ctl.call', { amount: num(Math.min(a.toCall, hero.chips)) });
     $('btnRaise').disabled = !a.canRaise;
 
     const slider = $('raiseSlider');
@@ -327,15 +396,11 @@
       slider.step = Math.max(1, Math.round(g.bigBlind / 2));
       const cur = parseInt(slider.value, 10);
       if (!cur || cur < a.minRaiseTo || cur > a.maxRaiseTo) {
-        const pot = g.totalPot();
-        const target = Math.min(a.maxRaiseTo,
-          Math.max(a.minRaiseTo, Math.round((g.currentBet + pot * 0.6) / g.bigBlind) * g.bigBlind));
-        slider.value = target;
+        const target = Math.round((g.currentBet + g.totalPot() * 0.6) / g.bigBlind) * g.bigBlind;
+        slider.value = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, target));
       }
       slider.disabled = false;
-    } else {
-      slider.disabled = true;
-    }
+    } else slider.disabled = true;
     updateRaiseLabel();
   }
 
@@ -345,68 +410,160 @@
     if (!hero) return;
     const a = g.actionsFor(hero);
     const v = parseInt($('raiseSlider').value, 10) || a.minRaiseTo;
-    const allIn = v >= a.maxRaiseTo;
-    const verb = a.isBet ? '벳' : '레이즈';
-    $('btnRaise').innerHTML = (allIn ? '올인 ' : verb + ' ') + v.toLocaleString() + ' <kbd>R</kbd>';
+    const key = v >= a.maxRaiseTo ? 'ctl.allin' : (a.isBet ? 'ctl.bet' : 'ctl.raise');
+    $('btnRaise').querySelector('span').textContent = T(key, { amount: num(v) });
   }
 
   function showBanner() {
     const g = state.game;
     const banner = $('resultBanner');
     if (!g.results) return;
-    const txt = g.results.winners.map(function (w) {
-      return w.name + ' +' + w.amount.toLocaleString() + (w.desc ? ' · ' + w.desc : '');
+    banner.textContent = g.results.winners.map(function (w) {
+      return w.desc
+        ? T('table.winsWith', { name: w.name, amount: num(w.amount), desc: w.desc })
+        : T('table.wins', { name: w.name, amount: num(w.amount) });
     }).join('   |   ');
-    banner.textContent = txt;
     banner.classList.add('show');
   }
 
-  /* ---------------- 렌더 ---------------- */
+  /* ==================== 애니메이션 ==================== */
+  function flyChip(fromEl, toEl, count) {
+    if (!fromEl || !toEl) return;
+    const layer = $('chipLayer');
+    const fr = fromEl.getBoundingClientRect();
+    const tr = toEl.getBoundingClientRect();
+    const lr = layer.getBoundingClientRect();
+    const n = Math.min(count || 3, 5);
+    for (let i = 0; i < n; i++) {
+      const c = document.createElement('div');
+      c.className = 'fly-chip';
+      c.style.left = (fr.left - lr.left + fr.width / 2 - 7 + (i - n / 2) * 3) + 'px';
+      c.style.top = (fr.top - lr.top + fr.height / 2 - 7) + 'px';
+      layer.appendChild(c);
+      const dx = (tr.left - fr.left) + (tr.width - fr.width) / 2;
+      const dy = (tr.top - fr.top) + (tr.height - fr.height) / 2;
+      /* 레이아웃을 한 번 강제한 뒤 트랜지션을 건다 */
+      c.getBoundingClientRect();
+      c.style.transitionDelay = (i * 45) + 'ms';
+      c.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(.7)';
+      c.style.opacity = '0';
+      setTimeout(function () { if (c.parentNode) c.parentNode.removeChild(c); }, 700 + i * 45);
+    }
+  }
+
+  function collectBetsToPot() {
+    const g = state.game;
+    const pot = $('pots');
+    g.players.forEach(function (p) {
+      if (p.bet > 0) {
+        const e = state.seatEls[p.id];
+        if (e) flyChip(e.bet, pot, 3);
+      }
+    });
+  }
+
+  function potToWinners() {
+    const g = state.game;
+    const pot = $('pots');
+    g.players.forEach(function (p) {
+      if (p.won > 0) {
+        const e = state.seatEls[p.id];
+        if (e) flyChip(pot, e.plate || e.root, 5);
+      }
+    });
+  }
+
+  function computeWinningCards() {
+    const g = state.game;
+    state.winningCards = [];
+    if (!g.results || g.results.uncontested || g.community.length < 5) return;
+    const winner = g.players.filter(function (p) { return p.won > 0 && !p.folded && p.cards.length; })[0];
+    if (!winner) return;
+    try {
+      state.winningCards = H.eval.best5(winner.cards.concat(g.community)).map(cardKey);
+    } catch (e) { state.winningCards = []; }
+  }
+
+  /* ==================== 액션 클락 ==================== */
+  function startClockTick() {
+    stopClockTick();
+    const g = state.game;
+    if (!g.actionClock) return;
+    let lastWarn = -1;
+    state.clockTimer = setInterval(function () {
+      if (!state.game || state.game.phase !== 'awaiting-action') return;
+      const left = state.game.clockRemaining();
+      if (left == null) return;
+      const actor = state.game.currentActor();
+      const e = actor ? state.seatEls[actor.id] : null;
+      if (e) {
+        const total = state.game.actionClock + (actor.timeBankLeft || 0);
+        const frac = Math.max(0, Math.min(1, left / total));
+        const color = frac < 0.25 ? '#d9534f' : frac < 0.5 ? '#e3b95a' : '#6fe3a4';
+        e.ring.style.background = 'conic-gradient(' + color + ' ' + (frac * 360) + 'deg, transparent 0)';
+      }
+      const secs = Math.ceil(left);
+      if (actor && actor.isHuman && secs <= 5 && secs !== lastWarn) { lastWarn = secs; SFX.tick(); }
+      if (left <= 0) {
+        state.game.timeout();
+        render();
+        loop();
+      }
+    }, 120);
+  }
+  function stopClockTick() {
+    if (state.clockTimer) { clearInterval(state.clockTimer); state.clockTimer = null; }
+  }
+
+  /* ==================== 렌더 ==================== */
   function render() {
     updateSeats();
     updateBoard();
     updateHeroReadout();
     updateControls();
-    renderLog();
+    refreshPanel();
   }
 
-  /* ---------------- 게임 루프 ---------------- */
-  function clearTimer() {
-    if (state.timer) { clearTimeout(state.timer); state.timer = null; }
-  }
+  /* ==================== 루프 ==================== */
+  function clearTimer() { if (state.timer) { clearTimeout(state.timer); state.timer = null; } }
 
   function loop() {
     clearTimer();
     const g = state.game;
-    const speed = state.opts.speed;
+    const speed = state.settings.speed;
 
     if (g.phase === 'awaiting-action') {
       const actor = g.currentActor();
-      if (actor && actor.isHuman) { render(); return; }
+      if (actor && actor.isHuman) { startClockTick(); render(); return; }
+      stopClockTick();
       render();
       state.timer = setTimeout(function () {
         const p = g.currentActor();
         if (!p || g.phase !== 'awaiting-action') { loop(); return; }
-        const decision = H.ai.decide(g, p);
-        if (decision.type === 'fold') SFX.fold();
-        else if (decision.type === 'raise') SFX.raise();
-        else if (decision.type === 'call') SFX.chip();
-        const res = g.act(p.id, decision);
+        let d;
+        try { d = H.ai.decide(g, p, { difficulty: state.settings.difficulty, tracker: state.tracker }); }
+        catch (e) { d = { type: g.actionsFor(p).canCheck ? 'check' : 'fold' }; }
+        playActionSound(d, p);
+        const res = g.act(p.id, d);
         if (!res.ok) g.act(p.id, { type: g.actionsFor(p).canCheck ? 'check' : 'fold' });
+        refreshHeroInfo(false);
         render();
         loop();
       }, speed + Math.random() * speed * 0.5);
       return;
     }
 
+    stopClockTick();
+
     if (g.phase === 'need-street') {
       render();
+      collectBetsToPot();
       state.timer = setTimeout(function () {
         g.dealNextStreet();
-        refreshEquity();
+        refreshHeroInfo(true);
         render();
         loop();
-      }, Math.max(450, speed * 0.9));
+      }, Math.max(520, speed * 0.9));
       return;
     }
 
@@ -415,29 +572,96 @@
       state.timer = setTimeout(function () {
         g.resolveShowdown();
         SFX.win();
-        render();
         loop();
-      }, Math.max(600, speed));
+      }, Math.max(650, speed));
+      return;
+    }
+
+    if (g.phase === 'show-choice') {
+      const p = g.showChoicePlayer;
+      if (!p || !p.isHuman) { g.chooseShow(false); loop(); return; }
+      render();
       return;
     }
 
     if (g.phase === 'hand-over') {
-      state.heroEquity = null;
-      state.equityToken++;
+      ensureFinished();
       render();
       const hero = g.byId(HERO_ID);
+      saveSession();
       if (!hero || hero.chips <= 0) {
-        setTimeout(function () { gameOver(false); }, 1200);
+        if (g.canRebuy(hero)) { setTimeout(function () { gameOver(false, true); }, 900); }
+        else setTimeout(function () { gameOver(false, false); }, 1100);
       } else if (g.players.filter(function (p) { return p.chips > 0; }).length < 2) {
-        setTimeout(function () { gameOver(true); }, 1200);
+        setTimeout(function () { gameOver(true, false); }, 1100);
       }
       return;
     }
 
     if (g.phase === 'game-over') {
       const hero = g.byId(HERO_ID);
-      gameOver(!!(hero && hero.chips > 0));
+      gameOver(!!(hero && hero.chips > 0), false);
     }
+  }
+
+  function playActionSound(d, p) {
+    if (d.type === 'fold') SFX.fold();
+    else if (d.type === 'check') SFX.check();
+    else if (d.type === 'raise' || d.type === 'bet') {
+      const a = state.game.actionsFor(p);
+      if (d.amount >= a.maxRaiseTo) SFX.allin(); else SFX.raise();
+    } else SFX.chip();
+  }
+
+  /*
+   * 핸드 마무리는 반드시 한 번만, 그리고 빠짐없이 일어나야 한다.
+   * (봇의 액션으로 모두 폴드되어 끝나는 경우가 있어서 액션 핸들러에만 두면 누락된다)
+   */
+  function ensureFinished() {
+    if (state.handFinalized) return;
+    state.handFinalized = true;
+    computeWinningCards();
+    finishHand();
+    potToWinners();
+  }
+
+  /* 핸드 종료 시의 뒷정리: 통계, 히스토리, 리뷰 */
+  function finishHand() {
+    const g = state.game;
+    state.tracker.endHand(g);
+    state.lastSummary = H.review.summarize(state.reviewItems, g.bigBlind);
+    state.recorder.record(g, { review: state.reviewItems.slice() });
+    if (state.settings.autoReview && state.reviewItems.length
+      && state.lastSummary.total > g.bigBlind * 0.6) {
+      // 다음 핸드가 이미 시작됐다면 띄우지 않는다 (클릭을 가로채는 문제)
+      setTimeout(function () {
+        if (state.game && state.game.phase === 'hand-over') openReview();
+      }, 900);
+    }
+    state.reviewItems = [];
+  }
+
+  /* ==================== 히어로 액션 ==================== */
+  function heroAct(action) {
+    const g = state.game;
+    const hero = g.byId(HERO_ID);
+    if (!hero || g.phase !== 'awaiting-action' || g.currentActor() !== hero) return;
+
+    /* 액션 직전에 리뷰 스냅샷 */
+    try {
+      const item = H.review.evaluate(g, hero, action, {
+        difficulty: 'hard', tracker: state.tracker
+      });
+      if (item) state.reviewItems.push(item);
+    } catch (e) { /* 리뷰 실패가 게임을 막지는 않는다 */ }
+
+    playActionSound(action, hero);
+    buzz(action.type === 'fold' ? 12 : 20);
+    const res = g.act(hero.id, action);
+    if (!res.ok) return;
+    refreshHeroInfo(false);
+    render();
+    loop();
   }
 
   function nextHand() {
@@ -445,174 +669,416 @@
     if (g.phase !== 'hand-over') return;
     $('community').innerHTML = '';
     state.communityRendered = 0;
+    state.winningCards = [];
+    state.reviewItems = [];
+    state.handFinalized = false;
+    state.tracker.startHand(g);
     g.startHand();
     if (g.phase === 'game-over') { loop(); return; }
     SFX.card();
-    refreshEquity();
+    refreshHeroInfo(true);
     render();
     loop();
   }
 
-  function heroAct(action) {
-    const g = state.game;
-    const hero = g.byId(HERO_ID);
-    if (!hero || g.phase !== 'awaiting-action' || g.currentActor() !== hero) return;
-    if (action.type === 'fold') SFX.fold();
-    else if (action.type === 'raise') SFX.raise();
-    else SFX.chip();
-    const res = g.act(hero.id, action);
-    if (!res.ok) return;
-    if (!hero.folded) refreshEquity();
-    render();
-    loop();
-  }
-
-  function gameOver(won) {
-    clearTimer();
-    const g = state.game;
-    $('overTitle').textContent = won ? '🏆 우승!' : '게임 오버';
-    $('overText').textContent = won
-      ? '모든 상대의 칩을 획득했습니다. ' + g.handNo + '핸드 만에 테이블을 정리했네요.'
-      : g.handNo + '핸드 만에 칩을 모두 잃었습니다. 다시 도전해 보세요.';
-    $('overModal').classList.add('show');
-  }
-
-  /* ---------------- 시작 ---------------- */
-  function startGame(opts) {
-    clearTimer();
-    state.opts = opts;
-    state.heroEquity = null;
-    state.equityToken++;
-    state.communityRendered = 0;
-    $('community').innerHTML = '';
-
-    const g = new H.Game({
-      smallBlind: opts.blind,
-      bigBlind: opts.blind * 2,
-      blindUpEvery: opts.blindUp
+  /* ==================== 패널 ==================== */
+  function switchTab(tab) {
+    state.tab = tab;
+    Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
+      const on = b.dataset.tab === tab;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    g.addPlayer({ id: HERO_ID, name: '나', chips: opts.chips, isHuman: true });
+    refreshPanel();
+  }
 
+  function refreshPanel() {
+    const host = $('tabBody');
+    if (!state.game || $('sidePanel').classList.contains('hidden')) return;
+    if (state.tab === 'log') H.panels.renderLog(state.game, host);
+    else if (state.tab === 'stats') H.panels.renderStats(state.tracker, state.game, host, HERO_ID);
+    else if (state.tab === 'hist') H.panels.renderHistory(state.recorder, host, HERO_ID, openReplay);
+    else if (state.tab === 'chart') {
+      state.chartState.playerCount = state.game.players.length;
+      const hero = state.game.byId(HERO_ID);
+      if (hero && hero.cards.length === 2) {
+        state.chartState.heroKey = H.ranges.classOf(hero.cards[0], hero.cards[1]);
+        state.chartState.position = state.game.position(hero) || state.chartState.position;
+      }
+      H.panels.renderChart(host, state.chartState);
+    }
+  }
+
+  /* ==================== 모달 ==================== */
+  function openModal(id) {
+    $(id).classList.add('show');
+    const focusable = $(id).querySelector('button, select, input');
+    if (focusable) focusable.focus();
+  }
+  function closeModal(id) { $(id).classList.remove('show'); }
+
+  function openReview() {
+    if (!state.lastSummary) return;
+    H.panels.renderReview(state.lastSummary, $('reviewBody'));
+    openModal('reviewModal');
+  }
+  function openReplay(hand) {
+    H.panels.createReplay(hand, $('replayBody'));
+    openModal('replayModal');
+  }
+
+  function gameOver(won, canRebuy) {
+    clearTimer();
+    stopClockTick();
+    const g = state.game;
+    const place = (g.finished.filter(function (f) { return f.id === HERO_ID; })[0] || {}).place;
+    $('overTitle').textContent = won ? T('over.win') : T('over.lose');
+    $('overText').textContent = won
+      ? T('over.winText', { n: g.handNo })
+      : (place ? T('over.place', { place: place }) : T('over.loseText', { n: g.handNo }));
+    const st = state.tracker.get(HERO_ID);
+    $('overStats').innerHTML = st
+      ? '<div class="over-stats">' +
+      statBox(T('stats.hands'), st.hands) +
+      statBox(T('stats.vpip'), Math.round(st.vpip * 100) + '%') +
+      statBox(T('stats.pfr'), Math.round(st.pfr * 100) + '%') +
+      statBox(T('stats.bb100'), (st.bb100 >= 0 ? '+' : '') + st.bb100.toFixed(1)) +
+      '</div>' : '';
+    const rb = $('btnRebuy');
+    rb.hidden = !canRebuy;
+    if (canRebuy) rb.textContent = T('over.rebuy', { amount: num(g.rebuyChips) });
+    if (won) SFX.win(); else SFX.lose();
+    H.storage.clearSession();
+    openModal('overModal');
+  }
+  function statBox(label, value) {
+    return '<div class="stat-box"><span>' + esc(label) + '</span><b>' + esc(value) + '</b></div>';
+  }
+
+  /* ==================== 설정 ==================== */
+  function fillSelect(id, items, value) {
+    const sel = $(id);
+    sel.innerHTML = '';
+    items.forEach(function (it) {
+      const o = document.createElement('option');
+      o.value = it.value;
+      o.textContent = it.label;
+      sel.appendChild(o);
+    });
+    sel.value = String(value);
+    if (sel.selectedIndex < 0) sel.selectedIndex = 0;
+  }
+
+  function buildSetup() {
+    const s = state.settings;
+    const bots = [];
+    for (let i = 1; i <= 5; i++) {
+      bots.push({ value: i, label: i === 1 ? T('setup.headsUp') : T('setup.opponentsN', { n: i }) });
+    }
+    fillSelect('optBots', bots, s.bots);
+    fillSelect('optDifficulty', [
+      { value: 'easy', label: T('setup.diffEasy') + ' — ' + T('setup.diffEasyDesc') },
+      { value: 'normal', label: T('setup.diffNormal') + ' — ' + T('setup.diffNormalDesc') },
+      { value: 'hard', label: T('setup.diffHard') + ' — ' + T('setup.diffHardDesc') }
+    ], s.difficulty);
+    fillSelect('optChips', [500, 1000, 2000, 5000].map(function (v) {
+      return { value: v, label: v.toLocaleString() };
+    }), s.chips);
+    fillSelect('optBlinds', [5, 10, 25].map(function (v) {
+      return { value: v, label: v + ' / ' + v * 2 };
+    }), s.blind);
+    fillSelect('optStructure', [
+      { value: 0, label: T('setup.structFixed') },
+      { value: 20, label: T('setup.structSlow') },
+      { value: 10, label: T('setup.structStandard') },
+      { value: 5, label: T('setup.structTurbo') }
+    ], s.structure);
+    fillSelect('optAnte', [
+      { value: 'off', label: T('setup.anteOff') },
+      { value: 'bb', label: T('setup.anteBB') },
+      { value: 'all', label: T('setup.anteAll') }
+    ], s.anteMode);
+    fillSelect('optSpeed', [
+      { value: 350, label: T('setup.speedFast') },
+      { value: 750, label: T('setup.speedNormal') },
+      { value: 1300, label: T('setup.speedSlow') }
+    ], s.speed);
+    fillSelect('optClock', [
+      { value: 0, label: T('setup.clockOff') },
+      { value: 15, label: T('setup.clockSec', { n: 15 }) },
+      { value: 30, label: T('setup.clockSec', { n: 30 }) }
+    ], s.actionClock);
+    fillSelect('optLang', H.i18n.LANGS.map(function (l) {
+      return { value: l, label: H.i18n.LANG_NAMES[l] };
+    }), s.lang);
+    $('optSeed').value = s.seed || '';
+    $('optEquity').checked = s.showEquity;
+    $('optThinking').checked = s.showThinking;
+    $('optReview').checked = s.autoReview;
+    $('optFourColor').checked = s.fourColor;
+    $('optRebuy').checked = s.allowRebuy;
+    applyI18nText();
+    $('btnResume').hidden = !H.storage.loadSession();
+  }
+
+  function readSetup() {
+    return {
+      lang: $('optLang').value,
+      bots: parseInt($('optBots').value, 10),
+      difficulty: $('optDifficulty').value,
+      chips: parseInt($('optChips').value, 10),
+      blind: parseInt($('optBlinds').value, 10),
+      structure: parseInt($('optStructure').value, 10),
+      anteMode: $('optAnte').value,
+      speed: parseInt($('optSpeed').value, 10),
+      actionClock: parseInt($('optClock').value, 10),
+      seed: $('optSeed').value.trim(),
+      showEquity: $('optEquity').checked,
+      showThinking: $('optThinking').checked,
+      autoReview: $('optReview').checked,
+      fourColor: $('optFourColor').checked,
+      allowRebuy: $('optRebuy').checked,
+      sound: state.sound
+    };
+  }
+
+  function applyI18nText() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-i18n]'), function (el) {
+      el.textContent = T(el.dataset.i18n);
+    });
+  }
+
+  /* ==================== 게임 시작 / 복원 ==================== */
+  function applySettings(s) {
+    state.settings = s;
+    state.sound = s.sound !== false;
+    H.i18n.setLang(s.lang);
+    $('app').dataset.fourColor = String(!!s.fourColor);
+    $('btnSound').textContent = state.sound ? '🔊' : '🔇';
+    $('btnSound').setAttribute('aria-pressed', String(state.sound));
+    H.storage.saveSettings(s);
+    applyI18nText();
+  }
+
+  function startGame(s) {
+    clearTimer(); stopClockTick();
+    applySettings(s);
+    H.storage.clearSession();
+
+    const seed = s.seed ? H.rng.decode(s.seed) : H.rng.randomSeed();
+    const rng = H.rng.create(seed);
+    const levels = H.tournament.makeLevels(s.blind, s.anteMode, 4);
+    const g = new H.Game({
+      rng: rng, seed: seed, levels: levels, levelEvery: s.structure,
+      smallBlind: s.blind, bigBlind: s.blind * 2, anteMode: s.anteMode,
+      actionClock: s.actionClock, timeBank: s.actionClock ? 15 : 0,
+      allowRebuy: s.allowRebuy, rebuyChips: s.allowRebuy ? s.chips : 0,
+      askShowChoice: true
+    });
+    if (!s.structure) { g.smallBlind = s.blind; g.bigBlind = s.blind * 2; g.ante = 0; }
+
+    g.addPlayer({ id: HERO_ID, name: T('common.you'), chips: s.chips, isHuman: true });
     const names = H.ai.NAMES.slice();
-    H.cards.shuffle(names);
+    H.cards.shuffle(names, rng);
     const profiles = H.ai.PROFILES.slice();
-    H.cards.shuffle(profiles);
-    for (let i = 0; i < opts.bots; i++) {
+    H.cards.shuffle(profiles, rng);
+    for (let i = 0; i < s.bots; i++) {
       g.addPlayer({
-        id: i + 1,
-        name: names[i % names.length],
-        chips: opts.chips,
+        id: i + 1, name: names[i % names.length], chips: s.chips,
         profile: profiles[i % profiles.length]
       });
     }
 
     state.game = g;
+    state.tracker = H.stats.create({ bigBlind: g.bigBlind });
+    state.recorder = H.history.create({ limit: 120 });
+    state.reviewItems = [];
+    state.lastSummary = null;
+    state.winningCards = [];
+    state.communityRendered = 0;
+    state.handFinalized = false;
+    $('community').innerHTML = '';
+    H.equity.initWorker();
+
     buildSeats();
+    state.tracker.startHand(g);
     g.startHand();
     SFX.card();
-    refreshEquity();
+    refreshHeroInfo(true);
     render();
     loop();
   }
 
-  function readOpts() {
-    return {
-      bots: parseInt($('optBots').value, 10),
-      chips: parseInt($('optChips').value, 10),
-      blind: parseInt($('optBlinds').value, 10),
-      blindUp: parseInt($('optBlindUp').value, 10),
-      speed: parseInt($('optSpeed').value, 10),
-      showEquity: $('optEquity').checked
-    };
+  function saveSession() {
+    if (!state.game) return;
+    try {
+      H.storage.saveSession({
+        settings: state.settings,
+        game: state.game.toJSON(),
+        tracker: state.tracker.toJSON(),
+        history: state.recorder.toJSON()
+      });
+    } catch (e) { /* 저장 실패는 무시 */ }
   }
 
-  /* ---------------- 이벤트 바인딩 ---------------- */
+  function resumeSession() {
+    const saved = H.storage.loadSession();
+    if (!saved) return false;
+    try {
+      applySettings(saved.settings);
+      state.game = H.Game.fromJSON(saved.game);
+      state.tracker = H.stats.Tracker.fromJSON(saved.tracker);
+      state.recorder = H.history.Recorder.fromJSON(saved.history);
+      state.reviewItems = [];
+      state.lastSummary = null;
+      state.winningCards = [];
+      state.communityRendered = 0;
+      state.handFinalized = state.game.phase === 'hand-over';
+      $('community').innerHTML = '';
+      H.equity.initWorker();
+      buildSeats();
+      refreshHeroInfo(true);
+      render();
+      loop();
+      return true;
+    } catch (e) {
+      H.storage.clearSession();
+      return false;
+    }
+  }
+
+  /* ==================== 이벤트 ==================== */
   function bind() {
     $('btnStart').addEventListener('click', function () {
-      $('setupModal').classList.remove('show');
-      startGame(readOpts());
+      closeModal('setupModal');
+      startGame(readSetup());
+    });
+    $('btnResume').addEventListener('click', function () {
+      closeModal('setupModal');
+      if (!resumeSession()) startGame(readSetup());
+    });
+    $('btnMenu').addEventListener('click', function () {
+      clearTimer(); stopClockTick();
+      buildSetup();
+      openModal('setupModal');
     });
     $('btnOverRestart').addEventListener('click', function () {
-      $('overModal').classList.remove('show');
-      $('setupModal').classList.add('show');
+      closeModal('overModal');
+      buildSetup();
+      openModal('setupModal');
     });
-    $('btnRestart').addEventListener('click', function () {
-      clearTimer();
-      $('setupModal').classList.add('show');
+    $('btnRebuy').addEventListener('click', function () {
+      closeModal('overModal');
+      state.game.rebuy(HERO_ID);
+      render();
+      loop();
     });
-    $('btnLogToggle').addEventListener('click', function () {
-      $('logPanel').classList.toggle('hidden');
+    $('btnPanel').addEventListener('click', function () {
+      const p = $('sidePanel');
+      p.classList.toggle('hidden');
+      $('btnPanel').setAttribute('aria-expanded', String(!p.classList.contains('hidden')));
+      refreshPanel();
     });
     $('btnSound').addEventListener('click', function () {
       state.sound = !state.sound;
-      $('btnSound').classList.toggle('off', !state.sound);
+      state.settings.sound = state.sound;
+      H.storage.saveSettings(state.settings);
       $('btnSound').textContent = state.sound ? '🔊' : '🔇';
+      $('btnSound').setAttribute('aria-pressed', String(state.sound));
     });
 
     $('btnFold').addEventListener('click', function () { heroAct({ type: 'fold' }); });
     $('btnCall').addEventListener('click', function () {
-      const g = state.game;
-      const hero = g.byId(HERO_ID);
+      const g = state.game, hero = g.byId(HERO_ID);
       heroAct({ type: g.actionsFor(hero).canCheck ? 'check' : 'call' });
     });
     $('btnRaise').addEventListener('click', function () {
       heroAct({ type: 'raise', amount: parseInt($('raiseSlider').value, 10) });
     });
-    $('btnNext').addEventListener('click', nextHand);
     $('raiseSlider').addEventListener('input', updateRaiseLabel);
+    $('btnNext').addEventListener('click', nextHand);
+    $('btnReview').addEventListener('click', openReview);
+    $('btnReviewClose').addEventListener('click', function () { closeModal('reviewModal'); });
+    $('btnReplayClose').addEventListener('click', function () { closeModal('replayModal'); });
+    $('btnShow').addEventListener('click', function () {
+      state.game.chooseShow(true); render(); loop();
+    });
+    $('btnMuck').addEventListener('click', function () {
+      state.game.chooseShow(false); render(); loop();
+    });
 
-    document.querySelectorAll('.presets button').forEach(function (b) {
+    Array.prototype.forEach.call(document.querySelectorAll('#presets button'), function (b) {
       b.addEventListener('click', function () {
-        const g = state.game;
-        const hero = g.byId(HERO_ID);
+        const g = state.game, hero = g.byId(HERO_ID);
         if (!hero) return;
         const a = g.actionsFor(hero);
-        const pct = b.dataset.pct;
+        const p = b.dataset.pct;
         let v;
-        if (pct === 'allin') v = a.maxRaiseTo;
+        if (p === 'allin') v = a.maxRaiseTo;
+        else if (p === 'min') v = a.minRaiseTo;
         else {
           const pot = g.totalPot();
-          v = Math.round((g.currentBet + a.toCall + pot * parseFloat(pct)) / g.bigBlind) * g.bigBlind;
+          v = Math.round((g.currentBet + a.toCall + pot * parseFloat(p)) / g.bigBlind) * g.bigBlind;
         }
-        v = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, v));
-        $('raiseSlider').value = v;
+        $('raiseSlider').value = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, v));
         updateRaiseLabel();
       });
     });
 
+    Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
+      b.addEventListener('click', function () { switchTab(b.dataset.tab); });
+    });
+
+    $('optLang').addEventListener('change', function () {
+      H.i18n.setLang($('optLang').value);
+      buildSetup();
+    });
+
     document.addEventListener('keydown', function (e) {
       if (e.target && /INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) return;
-      if ($('setupModal').classList.contains('show')) {
-        if (e.key === 'Enter') $('btnStart').click();
+      const openM = document.querySelector('.modal.show');
+      if (openM) {
+        if (e.key === 'Escape' && openM.id !== 'setupModal') closeModal(openM.id);
+        else if (e.key === 'Enter' && openM.id === 'setupModal') $('btnStart').click();
+        else if (openM.id === 'replayModal' && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+          const nav = openM.querySelectorAll('.replay-nav button');
+          (e.key === 'ArrowRight' ? nav[1] : nav[0]).click();
+        }
         return;
       }
       const k = e.key.toLowerCase();
       if (k === 'f') { e.preventDefault(); $('btnFold').click(); }
       else if (k === 'c') { e.preventDefault(); $('btnCall').click(); }
       else if (k === 'r') { e.preventDefault(); if (!$('btnRaise').disabled) $('btnRaise').click(); }
+      else if (k === 'v') { e.preventDefault(); openReview(); }
       else if (e.key === ' ') {
         e.preventDefault();
-        if (!$('btnNext').classList.contains('hidden')) nextHand();
+        if (!$('nextRow').classList.contains('hidden')) nextHand();
       }
     });
+
+    let resizeTimer = null;
+    global.addEventListener('resize', function () {
+      if (!state.game) return;
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function () { buildSeats(); render(); }, 200);
+    });
+
+    global.addEventListener('beforeunload', saveSession);
+    H.i18n.onChange(function () { applyI18nText(); if (state.game) render(); });
   }
 
-  let resizeTimer = null;
-  global.addEventListener('resize', function () {
-    if (!state.game) return;
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(function () {
-      buildSeats();
-      render();
-    }, 200);
-  });
-
   document.addEventListener('DOMContentLoaded', function () {
+    state.settings = H.storage.loadSettings();
+    state.sound = state.settings.sound !== false;
+    H.i18n.setLang(state.settings.lang);
     bind();
-    // 좁은 화면에서는 기록 패널을 기본으로 접어 둔다
-    if (global.innerWidth < 980) $('logPanel').classList.add('hidden');
-    $('setupModal').classList.add('show');
+    if (global.innerWidth < 980) $('sidePanel').classList.add('hidden');
+    switchTab('log');
+    buildSetup();
+    openModal('setupModal');
+    if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+      navigator.serviceWorker.register('sw.js').catch(function () { /* 오프라인 지원 실패는 무시 */ });
+    }
   });
-
-  global.HoldemUI = state;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

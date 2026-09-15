@@ -21,7 +21,8 @@
       sawFlop: 0, showdown: 0, wonShowdown: 0,
       wonHands: 0,
       net: 0,
-      chipsStart: 0
+      chipsStart: 0,
+      initialChips: null   // 세션 첫 핸드 시작 시의 스택 (그래프 기준선)
     };
   }
 
@@ -48,6 +49,7 @@
     game.players.forEach(function (p) {
       const d = self.ensure(p.id, p.name);
       d.chipsStart = p.chips + p.totalBet;
+      if (d.initialChips == null) d.initialChips = d.chipsStart;
     });
   };
 
@@ -130,6 +132,7 @@
       wsd: pct(d.wonShowdown, d.showdown),
       winRate: pct(d.wonHands, d.hands),
       net: d.net,
+      initialChips: d.initialChips,
       bb100: d.hands > 0 ? (d.net / this.bigBlind) / d.hands * 100 : 0,
       samples: {
         facedBet: d.facedBet, facedBetPre: d.facedBetPre, facedBetPost: d.facedBetPost,

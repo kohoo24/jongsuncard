@@ -725,3 +725,143 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 
 if (typeof module !== 'undefined' && module.exports) module.exports = globalThis.Holdem;
+
+/* ---------- 직렬화 (진행 중인 게임 저장/복원) ---------- */
+(function (global) {
+  const H = global.Holdem;
+  const Game = H.Game;
+
+  function cardsOut(arr) {
+    return arr.map(function (c) { return { rank: c.rank, suit: c.suit }; });
+  }
+
+  Game.prototype.toJSON = function () {
+    return {
+      v: 1,
+      seed: this.seed,
+      rngState: typeof this.rng.state === 'number' ? this.rng.state : null,
+      levels: this.levels,
+      levelIndex: this.levelIndex,
+      levelEvery: this.levelEvery,
+      anteMode: this.anteMode,
+      smallBlind: this.smallBlind,
+      bigBlind: this.bigBlind,
+      ante: this.ante,
+      allowRebuy: this.allowRebuy,
+      rebuyChips: this.rebuyChips,
+      rebuyUntilLevel: this.rebuyUntilLevel,
+      actionClock: this.actionClock,
+      timeBank: this.timeBank,
+      alwaysShow: this.alwaysShow,
+      askShowChoice: this.askShowChoice,
+      startingField: this.startingField,
+      finished: this.finished,
+      button: this.button,
+      handNo: this.handNo,
+      phase: this.phase,
+      street: this.street,
+      community: cardsOut(this.community),
+      deck: cardsOut(this.deck),
+      currentBet: this.currentBet,
+      minRaise: this.minRaise,
+      actor: this.actor,
+      revealAll: this.revealAll,
+      raisesThisStreet: this.raisesThisStreet,
+      lastAggressorId: this.lastAggressorId,
+      results: this.results,
+      handActions: this.handActions.map(function (a) {
+        const o = {};
+        Object.keys(a).forEach(function (k) { if (k !== 'cards') o[k] = a[k]; });
+        o.cards = cardsOut(a.cards || []);
+        return o;
+      }),
+      log: this.log.map(function (e) { return { hand: e.hand, key: e.key, params: e.params, kind: e.kind }; }),
+      players: this.players.map(function (p) {
+        return {
+          id: p.id, name: p.name, chips: p.chips, isHuman: p.isHuman,
+          profileKey: p.profile ? p.profile.key : null,
+          avatar: p.avatar,
+          cards: cardsOut(p.cards),
+          bet: p.bet, totalBet: p.totalBet,
+          folded: p.folded, allIn: p.allIn, acted: p.acted, mucked: p.mucked,
+          lastActionKey: p.lastActionKey, won: p.won, rebuys: p.rebuys,
+          timeBankLeft: p.timeBankLeft, bustStack: p.bustStack
+        };
+      })
+    };
+  };
+
+  Game.fromJSON = function (obj, opts) {
+    opts = opts || {};
+    const rng = H.rng.create(obj.seed || H.rng.randomSeed());
+    if (obj.rngState != null) rng.state = obj.rngState;
+
+    const g = new Game({
+      rng: rng, seed: obj.seed, levels: obj.levels, levelEvery: obj.levelEvery,
+      anteMode: obj.anteMode, allowRebuy: obj.allowRebuy, rebuyChips: obj.rebuyChips,
+      rebuyUntilLevel: obj.rebuyUntilLevel, actionClock: obj.actionClock,
+      timeBank: obj.timeBank, alwaysShow: obj.alwaysShow, askShowChoice: obj.askShowChoice,
+      onEvent: opts.onEvent
+    });
+    g.levelIndex = obj.levelIndex || 0;
+    g.smallBlind = obj.smallBlind;
+    g.bigBlind = obj.bigBlind;
+    g.ante = obj.ante || 0;
+    g.startingField = obj.startingField || (obj.players || []).length;
+    g.finished = obj.finished || [];
+    g.button = obj.button;
+    g.handNo = obj.handNo;
+    g.phase = obj.phase;
+    g.street = obj.street;
+    g.community = (obj.community || []).slice();
+    g.deck = (obj.deck || []).slice();
+    g.currentBet = obj.currentBet;
+    g.minRaise = obj.minRaise;
+    g.actor = obj.actor;
+    g.revealAll = obj.revealAll;
+    g.raisesThisStreet = obj.raisesThisStreet || 0;
+    g.lastAggressorId = obj.lastAggressorId != null ? obj.lastAggressorId : null;
+    g.results = obj.results || null;
+    g.handActions = obj.handActions || [];
+
+    const profiles = {};
+    if (H.ai) H.ai.PROFILES.forEach(function (pr) { profiles[pr.key] = pr; });
+
+    g.players = (obj.players || []).map(function (s) {
+      const p = new H.Player({
+        id: s.id, name: s.name, chips: s.chips, isHuman: s.isHuman,
+        profile: s.profileKey ? profiles[s.profileKey] : null, avatar: s.avatar
+      });
+      p.cards = s.cards.slice();
+      p.bet = s.bet; p.totalBet = s.totalBet;
+      p.folded = s.folded; p.allIn = s.allIn; p.acted = s.acted; p.mucked = s.mucked;
+      p.lastActionKey = s.lastActionKey || '';
+      p.lastAction = p.lastActionKey ? H.i18n.t(p.lastActionKey) : '';
+      p.won = s.won; p.rebuys = s.rebuys || 0;
+      p.timeBankLeft = s.timeBankLeft || 0;
+      p.bustStack = s.bustStack || s.chips;
+      if (p.folded || g.phase === 'hand-over') p.handResult = null;
+      return p;
+    });
+
+    (obj.log || []).forEach(function (e) {
+      const entry = { hand: e.hand, key: e.key, params: e.params, kind: e.kind };
+      Object.defineProperty(entry, 'text', {
+        get: function () { return H.i18n.t(this.key, this.params); },
+        enumerable: true
+      });
+      g.log.push(entry);
+    });
+
+    // 쇼다운이 끝난 상태로 복원되면 핸드 결과 표시를 위해 평가를 다시 붙인다
+    if (g.phase === 'hand-over' && g.community.length === 5) {
+      g.players.forEach(function (p) {
+        if (!p.folded && p.cards.length === 2) {
+          p.handResult = H.eval.evaluate(p.cards.concat(g.community));
+        }
+      });
+    }
+    if (g.phase === 'awaiting-action') g.startClock();
+    return g;
+  };
+})(typeof globalThis !== 'undefined' ? globalThis : this);
