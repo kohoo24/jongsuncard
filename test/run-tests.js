@@ -7,6 +7,7 @@ require('../js/rng.js');
 require('../js/ranges.js');
 require('../js/equity.js');
 require('../js/stats.js');
+require('../js/tournament.js');
 require('../js/i18n.js');
 const C = H.cards;
 
@@ -707,6 +708,265 @@ test('워커용 소스가 문법적으로 유효하고 동일한 결과를 낸�
   const viaWorkerSrc = S.run(req).equity;
   const direct = EQ.vsRanges({ hole: h, board: b, combos: combos, sims: 3000, seed: 999 });
   eq(viaWorkerSrc, direct.equity, '직렬화한 커널이 같은 결과를 내야 한다');
+});
+
+console.log('\n[앤티]');
+function anteGame(mode, chips, n) {
+  const g = new H.Game({
+    smallBlind: 10, bigBlind: 20, anteMode: mode, anteFrom: 1,
+    levels: [{ level: 1, sb: 10, bb: 20, ante: 5 }], rng: H.rng.create(11)
+  });
+  for (let i = 0; i < (n || 4); i++) {
+    g.addPlayer({ id: i, name: 'P' + i, chips: Array.isArray(chips) ? chips[i] : (chips || 1000) });
+  }
+  return g;
+}
+test('전원 앤티: 모두가 내고 팟에 정확히 더해진다', function () {
+  const g = anteGame('all');
+  g.startHand();
+  eq(g.totalPot(), 4 * 5 + 30, '앤티 20 + 블라인드 30');
+  g.players.forEach(function (p) { assert(p.totalBet >= 5, p.name + ' 앤티 미납'); });
+  eq(g.currentBet, 20, '앤티는 현재 베팅액에 영향을 주지 않는다');
+  const bbIdx = (g.button + 2) % 4;
+  eq(g.players[bbIdx].bet, 20, 'BB 의 스트리트 베팅은 블라인드만');
+});
+test('빅블라인드 앤티: BB 만 낸다', function () {
+  const g = anteGame('bb');
+  g.startHand();
+  eq(g.totalPot(), 5 + 30);
+  const bbIdx = (g.button + 2) % 4;
+  eq(g.players[bbIdx].totalBet, 25, 'BB 는 앤티 5 + 블라인드 20');
+});
+test('앤티를 낼 칩이 모자라면 올인 처리된다', function () {
+  const g = anteGame('all', [3, 1000, 1000, 1000]);
+  g.startHand();
+  eq(g.players[0].chips, 0);
+  eq(g.players[0].allIn, true);
+  eq(g.players[0].totalBet, 3);
+});
+test('앤티가 있어도 칩 총량이 보존된다', function () {
+  for (let trial = 0; trial < 20; trial++) {
+    const g = anteGame('all', [500, 800, 120, 2000]);
+    const before = g.players.reduce(function (s, p) { return s + p.chips; }, 0);
+    g.startHand();
+    let guard = 0;
+    while (g.phase !== 'hand-over' && g.phase !== 'game-over' && guard++ < 200) {
+      if (g.phase === 'awaiting-action') {
+        const p = g.currentActor(), a = g.actionsFor(p);
+        const r = Math.random();
+        if (r < 0.25 && a.canRaise) g.act(p.id, { type: 'raise', amount: a.maxRaiseTo });
+        else if (r < 0.7) g.act(p.id, { type: a.canCheck ? 'check' : 'call' });
+        else g.act(p.id, { type: a.canCheck ? 'check' : 'fold' });
+      } else if (g.phase === 'need-street') g.dealNextStreet();
+      else if (g.phase === 'showdown') g.resolveShowdown();
+    }
+    eq(g.players.reduce(function (s, p) { return s + p.chips; }, 0), before, '시도 ' + trial);
+  }
+});
+
+console.log('\n[토너먼트 구조]');
+test('블라인드 레벨이 예정대로 오른다', function () {
+  const g = new H.Game({ smallBlind: 10, levelEvery: 3, rng: H.rng.create(5) });
+  for (let i = 0; i < 3; i++) g.addPlayer({ id: i, name: 'P' + i, chips: 100000 });
+  const seen = [];
+  for (let h = 0; h < 7; h++) {
+    g.startHand();
+    seen.push(g.smallBlind + '/' + g.bigBlind);
+    let guard = 0;
+    while (g.phase !== 'hand-over' && guard++ < 200) {
+      if (g.phase === 'awaiting-action') g.act(g.currentActor().id, { type: 'fold' });
+      else if (g.phase === 'need-street') g.dealNextStreet();
+      else if (g.phase === 'showdown') g.resolveShowdown();
+    }
+  }
+  eq(seen[0], '10/20'); eq(seen[2], '10/20');
+  eq(seen[3], '15/30', '4번째 핸드에서 레벨업');
+  eq(seen[6], '25/50', '7번째 핸드에서 한 번 더');
+});
+test('레벨 스케줄이 단조 증가한다', function () {
+  const lv = H.tournament.makeLevels(25, 'all', 4);
+  for (let i = 1; i < lv.length; i++) {
+    assert(lv[i].bb > lv[i - 1].bb, '레벨 ' + (i + 1) + ' 블라인드가 오르지 않음');
+    eq(lv[i].bb, lv[i].sb * 2);
+  }
+  eq(lv[0].ante, 0, '1레벨엔 앤티 없음');
+  assert(lv[3].ante > 0, '4레벨부터 앤티');
+});
+test('탈락 순서가 등수로 기록된다', function () {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(3) });
+  g.addPlayer({ id: 0, name: 'Big', chips: 5000 });
+  g.addPlayer({ id: 1, name: 'Mid', chips: 300 });
+  g.addPlayer({ id: 2, name: 'Small', chips: 100 });
+  g.players[1].chips = 0; g.players[1].bustStack = 300;
+  g.players[2].chips = 0; g.players[2].bustStack = 100;
+  g.startHand();
+  // 2명이 탈락하고 마지막 생존자는 1위로 기록된다
+  eq(g.finished.length, 3);
+  eq(g.finished[0].name, 'Mid', '스택이 컸던 쪽이 상위 등수');
+  eq(g.finished[0].place, 2);
+  eq(g.finished[1].name, 'Small');
+  eq(g.finished[1].place, 3);
+  eq(g.finished[2].name, 'Big');
+  eq(g.finished[2].place, 1);
+  eq(g.phase, 'game-over');
+});
+test('리바이', function () {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, allowRebuy: true, rebuyChips: 1000, rebuyUntilLevel: 4 });
+  g.addPlayer({ id: 0, name: 'A', chips: 0, isHuman: true });
+  g.addPlayer({ id: 1, name: 'B', chips: 1000 });
+  assert(g.canRebuy(g.players[0]), '칩이 0이면 리바이 가능');
+  assert(!g.canRebuy(g.players[1]), '칩이 있으면 불가');
+  eq(g.rebuy(0), true);
+  eq(g.players[0].chips, 1000);
+  eq(g.players[0].rebuys, 1);
+});
+
+console.log('\n[ICM]');
+test('ICM 지분 합계가 상금 총액과 같다', function () {
+  const stacks = [5000, 3000, 1500, 500];
+  const pay = [6500, 3500];
+  const icm = H.tournament.icmEquity(stacks, pay);
+  const sum = icm.reduce(function (a, b) { return a + b; }, 0);
+  assert(Math.abs(sum - 10000) < 1, '합계 ' + sum.toFixed(0));
+});
+test('빅스택의 칩 가치가 희석된다 (ICM 압박)', function () {
+  const stacks = [5000, 3000, 1500, 500];
+  const pr = H.tournament.icmPressure(stacks, [6500, 3500]);
+  assert(pr[0] < 1, '빅스택 칩지분 대비 ' + pr[0].toFixed(2) + ' 은 1 미만이어야 한다');
+  assert(pr[3] > 1, '숏스택은 1 초과여야 한다');
+  for (let i = 1; i < pr.length; i++) assert(pr[i] > pr[i - 1], '스택이 작을수록 비율이 높다');
+});
+test('상금이 하나뿐이면 ICM 은 칩 비율과 같다', function () {
+  const stacks = [6000, 4000];
+  const icm = H.tournament.icmEquity(stacks, [1000]);
+  assert(Math.abs(icm[0] - 600) < 1 && Math.abs(icm[1] - 400) < 1, JSON.stringify(icm));
+});
+
+console.log('\n[머크 / 쇼]');
+function setupShowdown(cardMap, boardStr) {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(9) });
+  for (let i = 0; i < 3; i++) g.addPlayer({ id: i, name: 'P' + i, chips: 1000 });
+  g.startHand();
+  let guard = 0;
+  while (g.phase === 'awaiting-action' && guard++ < 20) {
+    const a = g.actionsFor(g.currentActor());
+    g.act(g.currentActor().id, { type: a.canCheck ? 'check' : 'call' });
+  }
+  while (g.phase === 'need-street') {
+    g.dealNextStreet();
+    let gg = 0;
+    while (g.phase === 'awaiting-action' && gg++ < 20) {
+      const a = g.actionsFor(g.currentActor());
+      g.act(g.currentActor().id, { type: a.canCheck ? 'check' : 'call' });
+    }
+  }
+  g.community = boardStr.split(/\s+/).map(C.parseCard);
+  Object.keys(cardMap).forEach(function (id) {
+    g.byId(+id).cards = cardMap[id].split(/\s+/).map(C.parseCard);
+  });
+  return g;
+}
+test('쇼다운에서 이길 수 없는 패는 머크한다', function () {
+  const g = setupShowdown({ 0: 'As Ad', 1: '7c 7h', 2: '3c 2h' }, 'Ah Kd 9s 4c 2s');
+  eq(g.phase, 'showdown');
+  g.resolveShowdown();
+  const winner = g.players.find(function (p) { return p.won > 0; });
+  eq(winner.id, 0, 'AAA 가 이긴다');
+  eq(winner.mucked, false, '승자는 반드시 공개');
+  const mucked = g.players.filter(function (p) { return p.mucked; });
+  assert(mucked.length >= 1, '진 쪽 중 최소 한 명은 머크해야 한다');
+});
+test('alwaysShow 면 전부 공개한다', function () {
+  const g = setupShowdown({ 0: 'As Ad', 1: '7c 7h', 2: '3c 2h' }, 'Ah Kd 9s 4c 2s');
+  g.alwaysShow = true;
+  g.resolveShowdown();
+  g.players.forEach(function (p) { eq(p.mucked, false, p.name); });
+});
+test('공개 순서는 마지막 공격자부터', function () {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(77) });
+  for (let i = 0; i < 3; i++) g.addPlayer({ id: i, name: 'P' + i, chips: 1000 });
+  g.startHand();
+  const raiser = g.currentActor();
+  g.act(raiser.id, { type: 'raise', amount: 60 });
+  let guard = 0;
+  while (g.phase === 'awaiting-action' && guard++ < 10) {
+    const a = g.actionsFor(g.currentActor());
+    g.act(g.currentActor().id, { type: a.canCheck ? 'check' : 'call' });
+  }
+  eq(g.lastAggressorId, raiser.id);
+  const order = g.showdownOrder();
+  eq(order[0].id, raiser.id, '마지막 공격자가 먼저 공개');
+});
+test('무쇼다운 승리 시 사람에게 공개 여부를 묻는다', function () {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, askShowChoice: true, rng: H.rng.create(12) });
+  g.addPlayer({ id: 0, name: 'Me', chips: 1000, isHuman: true });
+  g.addPlayer({ id: 1, name: 'Bot', chips: 1000 });
+  g.startHand();
+  // 헤즈업: 버튼(=사람이 아닐 수도 있음)부터. 사람이 아닌 쪽이 폴드하도록 진행
+  let guard = 0;
+  while (g.phase === 'awaiting-action' && guard++ < 6) {
+    const p = g.currentActor();
+    if (!p.isHuman) { g.act(p.id, { type: 'fold' }); break; }
+    g.act(p.id, { type: 'raise', amount: 60 });
+  }
+  eq(g.phase, 'show-choice');
+  eq(g.showChoicePlayer.id, 0);
+  g.chooseShow(true);
+  eq(g.phase, 'hand-over');
+  eq(g.players.find(function (p) { return p.id === 0; }).mucked, false);
+});
+test('봇은 무쇼다운 승리 시 자동으로 머크한다', function () {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, askShowChoice: true, rng: H.rng.create(13) });
+  g.addPlayer({ id: 0, name: 'Bot1', chips: 1000 });
+  g.addPlayer({ id: 1, name: 'Bot2', chips: 1000 });
+  g.startHand();
+  let guard = 0;
+  while (g.phase === 'awaiting-action' && guard++ < 6) g.act(g.currentActor().id, { type: 'fold' });
+  eq(g.phase, 'hand-over', '봇은 선택 단계를 거치지 않는다');
+});
+
+console.log('\n[액션 클락]');
+test('시간 초과 시 체크 가능하면 체크, 아니면 폴드', function () {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, actionClock: 15, rng: H.rng.create(21) });
+  for (let i = 0; i < 3; i++) g.addPlayer({ id: i, name: 'P' + i, chips: 1000 });
+  g.startHand();
+  const p = g.currentActor();
+  assert(g.clockRemaining() > 0 && g.clockRemaining() <= 15, '남은 시간 ' + g.clockRemaining());
+  g.timeout();
+  eq(g.byId(p.id).folded, true, '콜해야 하는 상황이면 폴드');
+
+  // BB 는 체크할 수 있어야 한다
+  const g2 = new H.Game({ smallBlind: 10, bigBlind: 20, actionClock: 15, rng: H.rng.create(22) });
+  for (let i = 0; i < 3; i++) g2.addPlayer({ id: i, name: 'Q' + i, chips: 1000 });
+  g2.startHand();
+  let guard = 0;
+  const bbIdx = (g2.button + 2) % 3;
+  while (g2.phase === 'awaiting-action' && g2.currentActor() !== g2.players[bbIdx] && guard++ < 6) {
+    g2.act(g2.currentActor().id, { type: 'call' });
+  }
+  const bb = g2.currentActor();
+  g2.timeout();
+  eq(bb.folded, false, 'BB 는 체크로 처리되어야 한다');
+});
+test('클락이 꺼져 있으면 남은 시간은 null', function () {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20 });
+  for (let i = 0; i < 2; i++) g.addPlayer({ id: i, name: 'P' + i, chips: 1000 });
+  g.startHand();
+  eq(g.clockRemaining(), null);
+});
+
+console.log('\n[로그 i18n]');
+test('언어를 바꾸면 과거 로그도 함께 바뀐다', function () {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(31) });
+  for (let i = 0; i < 3; i++) g.addPlayer({ id: i, name: 'P' + i, chips: 1000 });
+  g.startHand();
+  g.act(g.currentActor().id, { type: 'fold' });
+  const foldEntry = g.log.filter(function (e) { return e.kind === 'fold'; })[0];
+  H.i18n.setLang('ko');
+  assert(foldEntry.text.indexOf('폴드') >= 0, '한국어: ' + foldEntry.text);
+  H.i18n.setLang('en');
+  assert(foldEntry.text.indexOf('folds') >= 0, '영어: ' + foldEntry.text);
+  H.i18n.setLang('ko');
 });
 
 console.log('\n결과: ' + passed + ' 통과, ' + failed + ' 실패\n');

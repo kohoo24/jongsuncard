@@ -207,7 +207,7 @@
     state.communityRendered = g.community.length;
 
     $('potAmt').textContent = g.totalPot().toLocaleString();
-    $('streetLabel').textContent = g.community.length ? (H.STREET_NAMES[g.street] || '') : '';
+    $('streetLabel').textContent = g.community.length ? H.i18n.t('street.' + g.street) : '';
     $('handNo').textContent = '#' + g.handNo;
     $('blinds').textContent = g.smallBlind + ' / ' + g.bigBlind;
     const hero = g.byId(HERO_ID);
