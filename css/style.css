@@ -322,6 +322,41 @@ button.ghost[aria-pressed="false"] { opacity: .45; }
   box-shadow: 0 3px 10px rgba(0, 0, 0, .35);
 }
 
+/* 덱 — 딜러 버튼 자리에 놓인다 */
+.deck {
+  position: absolute;
+  width: 30px; height: 42px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: left .45s ease, top .45s ease;
+  opacity: .92;
+}
+.deck .deck-card {
+  position: absolute;
+  inset: 0;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, .55));
+}
+.deck .deck-card svg { display: block; width: 100%; height: 100%; }
+.deck.dealing { animation: deckNudge .3s ease-out; }
+/* 놓을 자리가 없을 때 — 딜링 출발점 역할만 한다 */
+.deck.ghost { opacity: 0; }
+@keyframes deckNudge {
+  0% { transform: translate(-50%, -50%) scale(1); }
+  40% { transform: translate(-50%, -52%) scale(1.06); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+/* 딜링: 카드가 덱에서 자기 자리로 날아온다 */
+@keyframes dealFly {
+  0% {
+    transform: translate(var(--dx, 0), var(--dy, 0)) rotate(var(--dr, -14deg)) scale(.88);
+    opacity: 0;
+  }
+  22% { opacity: 1; }
+  100% { transform: none; opacity: 1; }
+}
+.card.dealing { animation: dealFly .36s cubic-bezier(.22, .72, .3, 1) both; }
+
 /* 칩 애니메이션 */
 .chip-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .fly-chip {
@@ -696,6 +731,7 @@ kbd {
   .rail::after { inset: 4px; border-radius: 40% / 26%; }
   .felt { border-radius: 40% / 26%; }
   .seat { width: 112px; }
+  .deck { width: 22px; height: 31px; }
   .seat .plate { padding: 5px 6px; gap: 5px; }
   .seat .avatar { width: 24px; height: 24px; font-size: 14px; }
   .seat .avatar.pop { animation: facePop .32s ease-out; }
@@ -729,5 +765,5 @@ kbd {
   .seat .think { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .card, .fly-chip, .seat .avatar { animation: none !important; transition: none !important; }
+  .card, .fly-chip, .seat .avatar, .deck { animation: none !important; transition: none !important; }
 }

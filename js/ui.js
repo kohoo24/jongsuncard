@@ -54,6 +54,7 @@
     game: null, tracker: null, recorder: null, settings: null,
     seatEls: {}, communityRendered: 0, timer: null, clockTimer: null,
     heroInfo: null, drawInfo: null, reviewItems: [], lastSummary: null, handFinalized: false,
+    seatPos: {}, dealOrder: {}, dealing: false, deckSig: '', deckAt: null,
     tab: 'log', chartState: { position: 'BTN', playerCount: 6, heroKey: null, userPicked: false },
     sound: true, winningCards: [], busy: false
   };
@@ -139,6 +140,7 @@
     const heroIdx = g.players.findIndex(function (p) { return p.isHuman; });
     const order = [];
     for (let i = 0; i < n; i++) order.push(g.players[(heroIdx + i + n) % n]);
+    state.seatOrder = order;
     document.getElementById('felt').classList.toggle('narrow', narrow);
 
     order.forEach(function (p, i) {
@@ -184,12 +186,230 @@
       seat.appendChild(bet); seat.appendChild(badge); seat.appendChild(think);
       wrap.appendChild(seat);
 
+      state.seatPos[p.id] = { x: x, y: xy[1], idx: i };
       state.seatEls[p.id] = {
         root: seat, cards: cards, name: name, chips: chips, last: last,
         bet: bet, badge: badge, think: think, ring: ring, avatar: av,
         baseAvatar: base, sig: ''
       };
     });
+    buildDeck();
+    positionDeck(true);
+  }
+
+  /* ==================== 덱과 딜링 ==================== */
+  function reducedMotion() {
+    try { return global.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+    catch (e) { return false; }
+  }
+
+  function buildDeck() {
+    const host = $('deckSpot');
+    if (host.childElementCount) return;
+    /* 살짝 어긋나게 겹친 카드 뒷면 세 장 */
+    [[-2.5, -1.5], [1.5, -0.5], [0, 0]].forEach(function (o, i) {
+      const c = document.createElement('div');
+      c.className = 'deck-card';
+      c.style.transform = 'translate(' + o[0] + 'px,' + o[1] + 'px) rotate(' + (i * 2 - 2) + 'deg)';
+      c.appendChild(H.cardart.back());
+      host.appendChild(c);
+    });
+  }
+
+  /*
+   * 덱 자리 찾기.
+   *
+   * 원하는 자리는 "버튼 좌석과 그 옆 좌석 사이" — 실제 딜러가 앉는 곳이다.
+   * 다만 그 지점이 늘 비어 있지는 않다(헤즈업이면 정중앙, 3인이면 보드 위).
+   * 그래서 테이블 둘레의 타원 고리를 각도 순으로 훑어, 원하는 각도에서
+   * 가장 가까우면서 보드·팟·좌석과 겹치지 않는 자리를 고른다.
+   */
+  /*
+   * 레이아웃상의 상자를 잰다. getBoundingClientRect 는 자기 자신에게 걸린 transform 을
+   * 포함하므로, 딜링 중(카드가 덱에서 날아오는 중)에 재면 엉뚱한 자리가 나온다.
+   * 형제들이 같은 offsetParent 를 공유하는 흐름 안의 자식이라면 offset* 으로 되짚을 수 있다.
+   */
+  function layoutRect(child, parent) {
+    const pr = parent.getBoundingClientRect();
+    let dx, dy;
+    if (child.offsetParent === parent) {
+      dx = child.offsetLeft; dy = child.offsetTop;
+    } else if (child.offsetParent === parent.offsetParent) {
+      dx = child.offsetLeft - parent.offsetLeft; dy = child.offsetTop - parent.offsetTop;
+    } else {
+      return child.getBoundingClientRect();
+    }
+    const w = child.offsetWidth, h = child.offsetHeight;
+    return { left: pr.left + dx, top: pr.top + dy,
+             right: pr.left + dx + w, bottom: pr.top + dy + h, width: w, height: h };
+  }
+
+  function rectsOverlap(a, b, margin) {
+    const m = margin || 0;
+    return !(a.right < b.left - m || a.left > b.right + m ||
+             a.bottom < b.top - m || a.top > b.bottom + m);
+  }
+
+  function positionDeck(force) {
+    const g = state.game;
+    const host = $('deckSpot');
+    if (!g || !g.players.length || !state.seatOrder) return;
+    const fr = $('felt').getBoundingClientRect();
+    if (!fr.width) return;
+
+    /* 좁은 테이블에는 덱을 놓을 자리가 없다 — 그림은 숨기고 출발점으로만 쓴다 */
+    const roomy = fr.width >= 420 && fr.height >= 280;
+
+    /* 피해야 할 것: 실제로 보이는 보드/팟/스트리트 라벨, 그리고 좌석의 플레이트와 카드 */
+    const avoid = [];
+    /* 컨테이너가 아니라 자식(실제 보이는 카드/배지)을 재야 한다.
+       보드와 팟 줄은 가로로 꽉 찬 flex 박스여서, 통째로 피하면 띠 전체가 막힌다. */
+    ['community', 'pots'].forEach(function (id) {
+      const e = $(id);
+      if (!e) return;
+      for (let i = 0; i < e.children.length; i++) {
+        const r = layoutRect(e.children[i], e);
+        if (r.width > 0 && r.height > 0) avoid.push({ r: r, m: 12 });
+      }
+    });
+    /* 스트리트 라벨은 상자가 가로로 꽉 차 있다 — 글자가 실제로 차지하는 폭만 잰다 */
+    const label = document.querySelector('.street-label');
+    if (label && label.textContent) {
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      const lr = range.getBoundingClientRect();
+      avoid.push({ r: lr.width ? lr : label.getBoundingClientRect(), m: 6 });
+    }
+    g.players.forEach(function (p) {
+      const e = state.seatEls[p.id];
+      if (!e) return;
+      /* 좌석 전체 발자국 — 베팅 칩이 나타났다 사라져도 덱이 흔들리지 않게 통째로 피한다 */
+      avoid.push({ r: e.root.getBoundingClientRect(), m: 2 });
+      const plate = e.root.querySelector('.plate');
+      if (plate) avoid.push({ r: plate.getBoundingClientRect(), m: 6 });
+      if (e.cards.childElementCount) avoid.push({ r: e.cards.getBoundingClientRect(), m: 6 });
+      /* 베팅 칩·딜러 버튼·생각 말풍선도 좌석 밖으로 튀어나온다 */
+      [e.bet, e.badge, e.think].forEach(function (x) {
+        if (x && !x.classList.contains('hidden')) avoid.push({ r: x.getBoundingClientRect(), m: 6 });
+      });
+    });
+
+    const cx = fr.left + fr.width / 2, cy = fr.top + fr.height / 2;
+
+    /* 원하는 각도: 버튼 좌석과 다음 좌석의 중간 지점 방향 */
+    const btn = g.players[g.button];
+    const a = btn && state.seatPos[btn.id];
+    let wantX = 50, wantY = 70;
+    if (a) {
+      const n = state.seatOrder.length;
+      const next = state.seatOrder[(a.idx + 1) % n];
+      const b2 = next && state.seatPos[next.id];
+      wantX = b2 ? (a.x + b2.x) / 2 : a.x;
+      wantY = b2 ? (a.y + b2.y) / 2 : Math.min(90, a.y + 8);
+    }
+    const wantPx = fr.left + fr.width * wantX / 100;
+    const wantPy = fr.top + fr.height * wantY / 100;
+    const preferred = Math.atan2(wantPy - cy, wantPx - cx);
+
+    function moveTo(px, py) {
+      host.style.left = (((px - fr.left) / fr.width) * 100).toFixed(2) + '%';
+      host.style.top = (((py - fr.top) / fr.height) * 100).toFixed(2) + '%';
+      state.deckAt = { x: px, y: py };
+    }
+    /*
+     * 후보 자리는 계산으로만 따진다.
+     * 덱에는 left/top 트랜지션이 걸려 있어서, 옮긴 직후 getBoundingClientRect 를 읽으면
+     * 아직 움직이는 중인 예전 자리가 나온다 (그래서 탐색이 엉뚱한 답을 냈다).
+     */
+    const dw = host.offsetWidth || 30, dh = host.offsetHeight || 42;
+    function clearAt(px, py) {
+      const d = { left: px - dw / 2, right: px + dw / 2, top: py - dh / 2, bottom: py + dh / 2 };
+      if (d.left < fr.left + 6 || d.right > fr.right - 6 ||
+          d.top < fr.top + 6 || d.bottom > fr.bottom - 6) return false;
+      for (let i = 0; i < avoid.length; i++) {
+        if (rectsOverlap(d, avoid[i].r, avoid[i].m)) return false;
+      }
+      return true;
+    }
+
+    /* 지금 자리가 아직 멀쩡하면 건드리지 않는다 (매 렌더마다 옮기면 덱이 떨린다) */
+    if (!force && state.deckAt && !host.classList.contains('ghost') &&
+        clearAt(state.deckAt.x, state.deckAt.y)) return;
+
+    /* 고리를 각도 순으로 훑는다 (원하는 각도에서 가까운 쪽부터) */
+    const RADII = [0.34, 0.30, 0.38, 0.26];
+    let found = false;
+    for (let ri = 0; ri < RADII.length && !found; ri++) {
+      const rx = fr.width * RADII[ri], ry = fr.height * RADII[ri] * 0.98;
+      for (let step = 0; step <= 18 && !found; step++) {
+        const dirs = step === 0 ? [1] : [1, -1];
+        for (let di = 0; di < dirs.length && !found; di++) {
+          const ang = preferred + dirs[di] * step * (Math.PI / 18);
+          const px = cx + Math.cos(ang) * rx, py = cy + Math.sin(ang) * ry;
+          if (clearAt(px, py)) { moveTo(px, py); found = true; }
+        }
+      }
+    }
+    if (!found) moveTo(wantPx, wantPy);   // 못 찾으면 원래 자리 (숨겨질 것)
+    host.classList.toggle('ghost', !roomy || !found);
+  }
+
+  /*
+   * 덱 주변 상황(버튼 위치, 보드 장수, 팟 배지 수)이 바뀌었을 때만 자리를 다시 잡는다.
+   * 매 렌더마다 돌리면 해가 미세하게 달라져 덱이 떨린다.
+   */
+  function ensureDeckClear() {
+    const g = state.game;
+    if (!g) return;
+    const sig = g.button + ':' + g.community.length + ':' + $('pots').childElementCount +
+      ':' + ($('streetLabel').textContent ? 1 : 0);
+    const changed = sig !== state.deckSig;
+    state.deckSig = sig;
+    /* 판이 바뀌면 다시 고르고, 그렇지 않으면 지금 자리가 막혔을 때만 옮긴다 */
+    positionDeck(changed);
+  }
+
+  /* 카드가 덱에서 제자리로 날아오게 한다 (DOM 에 붙인 뒤 호출) */
+  function animateDeal(cardEl, delayMs) {
+    if (reducedMotion()) return;
+    const deck = $('deckSpot');
+    const dr = deck.getBoundingClientRect();
+    const cr = cardEl.getBoundingClientRect();
+    if (!dr.width || !cr.width) return;
+    const dx = (dr.left + dr.width / 2) - (cr.left + cr.width / 2);
+    const dy = (dr.top + dr.height / 2) - (cr.top + cr.height / 2);
+    cardEl.style.setProperty('--dx', dx.toFixed(1) + 'px');
+    cardEl.style.setProperty('--dy', dy.toFixed(1) + 'px');
+    cardEl.style.setProperty('--dr', (dx > 0 ? 14 : -14) + 'deg');
+    cardEl.style.animationDelay = delayMs + 'ms';
+    cardEl.classList.add('dealing');
+  }
+
+  /* 버튼 다음 자리부터 도는 배분 순서 */
+  function computeDealOrder() {
+    const g = state.game;
+    const n = g.players.length;
+    state.dealOrder = {};
+    for (let i = 1; i <= n; i++) {
+      const p = g.players[(g.button + i) % n];
+      state.dealOrder[p.id] = i - 1;
+    }
+  }
+
+  function startDealAnimation() {
+    if (reducedMotion()) return;
+    state.dealing = true;
+    const n = state.game.players.length;
+    const total = n * 2 * 55 + 360;
+    const deck = $('deckSpot');
+    deck.classList.remove('dealing');
+    void deck.offsetWidth;
+    deck.classList.add('dealing');
+    /* 카드 소리는 몇 번만 (전부 내면 시끄럽다) */
+    for (let i = 0; i < Math.min(5, n * 2); i++) {
+      setTimeout(SFX.card, i * 90);
+    }
+    setTimeout(function () { state.dealing = false; }, total);
   }
 
   function updateSeats() {
@@ -263,12 +483,16 @@
         e.sig = s;
         e.cards.innerHTML = '';
         if (show) {
-          p.cards.forEach(function (c) {
+          const n = g.players.length;
+          const order = state.dealOrder[p.id] || 0;
+          p.cards.forEach(function (c, ci) {
             const ce = cardEl(hidden ? null : c, { small: !p.isHuman });
             if (p.folded) ce.classList.add('dim');
             if (wasHidden && !hidden) ce.classList.add('flip');
             if (state.winningCards.indexOf(cardKey(c)) >= 0) ce.classList.add('win-card');
             e.cards.appendChild(ce);
+            /* 핸드가 막 시작됐으면 덱에서 날아오게 한다 */
+            if (state.dealing && !p.folded) animateDeal(ce, (ci * n + order) * 55);
           });
         }
       } else if (state.winningCards.length && show && !hidden) {
@@ -287,11 +511,21 @@
       wrap.innerHTML = '';
       state.communityRendered = 0;
     }
+    const fresh = g.community.length - state.communityRendered;
     for (let i = state.communityRendered; i < g.community.length; i++) {
       const ce = cardEl(g.community[i]);
-      ce.style.animationDelay = ((i - state.communityRendered) * 90) + 'ms';
+      const delay = (i - state.communityRendered) * 95;
       wrap.appendChild(ce);
-      SFX.card();
+      animateDeal(ce, delay);
+      if (!ce.classList.contains('dealing')) ce.style.animationDelay = delay + 'ms';
+      setTimeout(SFX.card, delay);
+    }
+    if (fresh > 0) {
+      const deck = $('deckSpot');
+      deck.classList.remove('dealing');
+      void deck.offsetWidth;
+      deck.classList.add('dealing');
+      /* 보드가 커지면 덱이 가려질 수 있다 — 아래 ensureDeckClear 가 처리한다 */
     }
     state.communityRendered = g.community.length;
     Array.prototype.forEach.call(wrap.children, function (ce, i) {
@@ -610,6 +844,7 @@
     updateHeroReadout();
     updateStreetSummary();
     updateControls();
+    ensureDeckClear();
     refreshPanel();
   }
 
@@ -765,9 +1000,13 @@
     state.tracker.startHand(g);
     g.startHand();
     if (g.phase === 'game-over') { loop(); return; }
-    SFX.card();
+    computeDealOrder();
+    state.deckSig = '';
+    positionDeck(true);      // 딜링 출발점
+    startDealAnimation();
     refreshHeroInfo(true);
     render();
+    positionDeck(true);      // 컨트롤 높이가 확정된 뒤 최종 위치/표시 여부
     loop();
   }
 
@@ -998,9 +1237,13 @@
     buildSeats();
     state.tracker.startHand(g);
     g.startHand();
-    SFX.card();
+    computeDealOrder();
+    state.deckSig = '';
+    positionDeck(true);      // 딜링 출발점
+    startDealAnimation();
     refreshHeroInfo(true);
     render();
+    positionDeck(true);      // 컨트롤 높이가 확정된 뒤 최종 위치/표시 여부
     loop();
   }
 
@@ -1032,6 +1275,8 @@
       $('community').innerHTML = '';
       H.equity.initWorker();
       buildSeats();
+      computeDealOrder();
+      positionDeck(true);
       refreshHeroInfo(true);
       render();
       loop();
@@ -1165,7 +1410,7 @@
     global.addEventListener('resize', function () {
       if (!state.game) return;
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(function () { buildSeats(); render(); }, 200);
+      resizeTimer = setTimeout(function () { buildSeats(); positionDeck(true); render(); }, 200);
     });
 
     global.addEventListener('beforeunload', saveSession);
