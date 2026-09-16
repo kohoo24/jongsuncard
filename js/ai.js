@@ -81,6 +81,12 @@
     adaptiveVpip: 0.28,
     adaptiveVpipPerPlayer: 0.018,
     adaptiveHands: 30,
+    /* 루즈해도 어그레시브(LAG)하면 전환하지 않는다 — PFR/VPIP 가 기준 이상이면 어그레시브.
+       인원이 많을수록 뒤에서 콜로 들어오는 일이 늘어 비율이 낮아지므로 VPIP 처럼 한 명당 낮춘다.
+       봇 측정(4인 / 9인 좌석별): LAG 0.85~0.87 / 0.71~0.85 · 밸런스드 0.65~0.67 / 0.56~0.73 ·
+       스테이션 0.20 / 0.15. LAG 에게는 솔버 전환이 +50 → +41 (9인 +42 → +38) 로 이득이 없었다. */
+    adaptiveAggRatio: 0.78,
+    adaptiveAggRatioPerPlayer: 0.016,
     cbetAware: false,        // 어그레서의 플랍 첫 벳을 넓게 본다 — 단독 +9.0 → +4.5, 효과 없음
     /* 벳 레인지 양극화: 벳은 밸류 + 공기(블러프)이고 중간 핸드는 체크한다. 진단: TAG 의 헤즈업
        C벳은 상위 20% 가 59%, 공기(상위 45% 밖)가 41% 였는데 선형 레인지로 보면 콜당했을 때의
@@ -392,42 +398,48 @@
   function adaptiveThreshold(n) {
     return Math.max(0.15, TUNE.adaptiveVpip - (n - 4) * TUNE.adaptiveVpipPerPlayer);
   }
+  function aggRatioThreshold(n) {
+    return Math.max(0.5, TUNE.adaptiveAggRatio - (n - 4) * TUNE.adaptiveAggRatioPerPlayer);
+  }
 
   function shouldUseSolver(ctx) {
     if (TUNE.solver) return true;
     if (TUNE.huSolver && ctx.n === 2) return true;
     if (TUNE.adaptiveSolver && ctx.diff.useProfiling && ctx.tracker) {
-      const v = opponentsVpip(ctx);
-      if (v != null && v >= adaptiveThreshold(ctx.n)) return true;
+      const o = opponentProfile(ctx);
+      if (o && o.vpip >= adaptiveThreshold(ctx.n) &&
+          !(TUNE.adaptiveAggRatio && o.pfr / o.vpip >= aggRatioThreshold(ctx.n))) return true;
     }
     return false;
   }
 
   /*
-   * 이 결정에 관련된 상대의 VPIP (표본이 모자라면 null).
+   * 이 결정에 관련된 상대의 { vpip, pfr } (표본이 모자라면 null).
    * 레이즈에 직면했으면 그 어그레서, 아직 열리지 않았으면 뒤에 행동할 사람들의 평균.
    * 테이블 전체 평균을 쓰면 다른 봇 좌석에 희석되어 9인에서는 한 번도 넘지 못했다.
    */
-  function opponentsVpip(ctx) {
+  function opponentProfile(ctx) {
     const game = ctx.game, tracker = ctx.tracker;
     const stat = function (p) {
       const st = tracker.get(p.id);
-      return (st && st.hands >= TUNE.adaptiveHands) ? st.vpip : null;
+      return (st && st.hands >= TUNE.adaptiveHands) ? { vpip: st.vpip, pfr: st.pfr } : null;
     };
     if (game.raisesThisStreet >= 2 && game.aggressor && game.aggressor !== ctx.player) {
       return stat(game.aggressor);
     }
-    let sum = 0, n = 0;
+    let sum = 0, sumPfr = 0, n = 0;
     const me = game.players.indexOf(ctx.player), total = game.players.length;
     for (let k = 1; k < total; k++) {
       const p = game.players[(me + k) % total];
       if (p.folded || p.allIn) continue;
       const v = stat(p);
       if (v == null) return null;
-      sum += v; n++;
+      sum += v.vpip; sumPfr += v.pfr; n++;
     }
-    return n ? sum / n : null;
+    return n ? { vpip: sum / n, pfr: sumPfr / n } : null;
   }
+
+  function opponentsVpip(ctx) { const o = opponentProfile(ctx); return o ? o.vpip : null; }
 
   /* ---------- 레이즈 금액 정리 ---------- */
   function raiseTo(ctx, target) {
@@ -845,7 +857,9 @@
     PROFILES: PROFILES,
     shouldUseSolver: shouldUseSolver,
     adaptiveThreshold: adaptiveThreshold,
+    aggRatioThreshold: aggRatioThreshold,
     opponentsVpip: opponentsVpip,
+    opponentProfile: opponentProfile,
     NAMES: NAMES,
     DIFFICULTY: DIFFICULTY,
     KEEP_FOR_RATIO: KEEP_FOR_RATIO,
