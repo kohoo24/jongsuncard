@@ -252,6 +252,82 @@ test('장기 자동 플레이 안정성 (봇 100핸드)', function () {
   assert(hands > 10, '충분히 많은 핸드가 진행되어야 한다 (진행: ' + hands + ')');
 });
 
+console.log('\n[숏 올인과 레이즈 재개 규칙]');
+function threeWay(chips) {
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(1) });
+  chips.forEach(function (c, i) { g.addPlayer({ id: i, name: 'P' + i, chips: c }); });
+  g.startHand();
+  return g;
+}
+test('정식 레이즈에 못 미치는 올인은 이미 행동한 사람에게 레이즈를 다시 열지 않는다', function () {
+  const g = threeWay([2000, 2000, 70]);       // BTN=0 오픈, SB=1 콜, BB=2 가 70 으로 숏 올인
+  let p = g.currentActor();
+  eq(g.act(p.id, { type: 'raise', amount: 60 }).ok, true);
+  p = g.currentActor();
+  eq(g.act(p.id, { type: 'call' }).ok, true);
+  p = g.currentActor();
+  eq(p.chips + p.bet, 70);
+  eq(g.act(p.id, { type: 'raise', amount: 70 }).ok, true);
+  assert(p.allIn, '올인이어야 한다');
+  p = g.currentActor();
+  eq(p.id, 0);
+  const a = g.actionsFor(p);
+  eq(a.toCall, 10);
+  eq(a.canRaise, false, '오프너는 콜/폴드만 가능해야 한다');
+  eq(g.act(p.id, { type: 'raise', amount: 200 }).ok, false);
+  eq(g.act(p.id, { type: 'call' }).ok, true);
+  p = g.currentActor();
+  eq(p.id, 1);
+  eq(g.actionsFor(p).canRaise, false, '콜했던 사람도 레이즈할 수 없다');
+  eq(g.act(p.id, { type: 'call' }).ok, true);
+  eq(g.phase, 'need-street');
+});
+test('아직 행동하지 않은 사람은 숏 올인 뒤에도 레이즈할 수 있다', function () {
+  const g = threeWay([2000, 2000, 2000, 70]);  // UTG=3 오픈, BTN=0 콜, SB=1 숏 올인? -> SB 는 2000. 대신 BB 를 숏으로
+  // 4인: BTN=0, SB=1, BB=2, UTG=3(70칩). UTG 가 70 으로 올인(오픈), BTN 은 아직 행동 전
+  let p = g.currentActor();
+  eq(p.id, 3);
+  eq(g.act(p.id, { type: 'raise', amount: 70 }).ok, true);
+  p = g.currentActor();
+  eq(p.id, 0);
+  eq(g.actionsFor(p).canRaise, true, '첫 행동이면 레이즈할 수 있다');
+});
+test('정식 레이즈가 나오면 다시 모두에게 레이즈가 열린다', function () {
+  const g = threeWay([2000, 2000, 70, 2000]); // BTN=0, SB=1, BB=2(70), UTG=3
+  let p = g.currentActor();                    // UTG
+  g.act(p.id, { type: 'raise', amount: 60 });
+  p = g.currentActor();                        // BTN 콜
+  g.act(p.id, { type: 'call' });
+  p = g.currentActor();                        // SB 콜
+  g.act(p.id, { type: 'call' });
+  p = g.currentActor();                        // BB 숏 올인 70
+  g.act(p.id, { type: 'raise', amount: 70 });
+  p = g.currentActor();                        // UTG: 닫혀 있다
+  eq(p.id, 3);
+  eq(g.actionsFor(p).canRaise, false);
+  g.act(p.id, { type: 'call' });
+  p = g.currentActor();                        // BTN: 닫혀 있다 — 저장/복원에도 남아야 한다
+  eq(p.id, 0);
+  eq(g.actionsFor(p).canRaise, false);
+  const back = H.Game.fromJSON(JSON.parse(JSON.stringify(g.toJSON())));
+  eq(back.actionsFor(back.currentActor()).canRaise, false, 'raiseClosed 가 저장/복원되어야 한다');
+});
+test('플랍에서 정식 레이즈 뒤에는 모두 다시 레이즈할 수 있다', function () {
+  const g = threeWay([2000, 2000, 2000]);
+  let p = g.currentActor();
+  g.act(p.id, { type: 'raise', amount: 60 });
+  g.act(g.currentActor().id, { type: 'call' });
+  g.act(g.currentActor().id, { type: 'call' });
+  g.dealNextStreet();
+  p = g.currentActor();
+  g.act(p.id, { type: 'raise', amount: 40 });   // 벳
+  p = g.currentActor();
+  g.act(p.id, { type: 'raise', amount: 120 });  // 정식 레이즈
+  p = g.currentActor();
+  eq(g.actionsFor(p).canRaise, true);
+  eq(g.actionsFor(p).minRaiseTo, 200);
+});
+
 console.log('\n[고속 평가기 교차검증]');
 // 독립적인 레퍼런스 구현(21조합 브루트포스)과 순위가 일치하는지 검증한다.
 function refEval5(cards) {

@@ -37,6 +37,7 @@
     this.folded = false;
     this.allIn = false;
     this.acted = false;
+    this.raiseClosed = false;   // 정식 레이즈에 못 미치는 올인을 받은 뒤에는 콜/폴드만 가능
     this.mucked = false;
     this.lastAction = '';
     this.lastActionKey = '';
@@ -169,7 +170,7 @@
     return {
       toCall: toCall,
       canCheck: toCall === 0,
-      canRaise: player.chips > toCall,
+      canRaise: player.chips > toCall && !player.raiseClosed,
       minRaiseTo: minRaiseTo,
       maxRaiseTo: maxRaiseTo,
       isBet: this.currentBet === 0
@@ -300,7 +301,7 @@
     for (let i = 0; i < n; i++) {
       const p = this.players[i];
       p.cards = []; p.bet = 0; p.totalBet = 0;
-      p.folded = false; p.allIn = false; p.acted = false; p.mucked = false;
+      p.folded = false; p.allIn = false; p.acted = false; p.raiseClosed = false; p.mucked = false;
       p.lastAction = ''; p.lastActionKey = ''; p.handResult = null; p.won = 0;
       p.bustStack = p.chips;
     }
@@ -443,7 +444,13 @@
       const prevBet = this.currentBet;
       this.putIn(p, target - p.bet);
       const raiseBy = p.bet - prevBet;
-      if (raiseBy >= this.minRaise) this.minRaise = raiseBy;
+      /*
+       * 정식 레이즈(최소 레이즈 이상)만 액션을 다시 연다. 그에 못 미치는 올인은
+       * 이미 행동한 사람에게 콜/폴드만 남긴다 — 그 사람이 다시 레이즈할 수는 없다.
+       * 아직 행동하지 않은 사람은 물론 레이즈할 수 있다.
+       */
+      const fullRaise = raiseBy >= this.minRaise;
+      if (fullRaise) this.minRaise = raiseBy;
       if (p.bet > this.currentBet) {
         this.currentBet = p.bet;
         this.raisesThisStreet++;
@@ -451,7 +458,9 @@
         this.lastAggressorId = p.id;
         for (let i = 0; i < this.players.length; i++) {
           const o = this.players[i];
-          if (o !== p && !o.folded && !o.allIn) o.acted = false;
+          if (o === p || o.folded || o.allIn) continue;
+          if (fullRaise) { o.acted = false; o.raiseClosed = false; }
+          else if (o.acted) o.raiseClosed = true;
         }
       }
       p.acted = true;
@@ -510,6 +519,7 @@
     for (let i = 0; i < this.players.length; i++) {
       this.players[i].bet = 0;
       this.players[i].acted = false;
+      this.players[i].raiseClosed = false;
     }
     this.currentBet = 0;
     this.minRaise = this.bigBlind;
@@ -806,7 +816,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
           avatar: p.avatar,
           cards: cardsOut(p.cards),
           bet: p.bet, totalBet: p.totalBet,
-          folded: p.folded, allIn: p.allIn, acted: p.acted, mucked: p.mucked,
+          folded: p.folded, allIn: p.allIn, acted: p.acted, raiseClosed: !!p.raiseClosed, mucked: p.mucked,
           lastActionKey: p.lastActionKey, won: p.won, rebuys: p.rebuys,
           timeBankLeft: p.timeBankLeft, bustStack: p.bustStack
         };
@@ -858,7 +868,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       });
       p.cards = s.cards.slice();
       p.bet = s.bet; p.totalBet = s.totalBet;
-      p.folded = s.folded; p.allIn = s.allIn; p.acted = s.acted; p.mucked = s.mucked;
+      p.folded = s.folded; p.allIn = s.allIn; p.acted = s.acted; p.raiseClosed = !!s.raiseClosed; p.mucked = s.mucked;
       p.lastActionKey = s.lastActionKey || '';
       p.lastAction = p.lastActionKey ? H.i18n.t(p.lastActionKey) : '';
       p.won = s.won; p.rebuys = s.rebuys || 0;

@@ -47,6 +47,49 @@ async function safeClick(page, selector) {
   await page.click(selector);
 }
 
+/* 판이 끝났으면(게임 종료 모달) 새 판을 연다. 모달은 핸드 종료 뒤 약 1초 늦게 뜨므로
+   핸드가 끝난 상태에서 히어로가 파산했거나 한 명만 남았으면 모달을 기다린다. */
+async function restartIfOver(page, seed) {
+  const st = await page.evaluate(function () {
+    const g = window.HoldemUI.game;
+    const m = document.querySelector('.modal.show');
+    if (!g) return { modal: m ? m.id : null, ending: false };
+    const hero = g.byId(0);
+    const alive = g.players.filter(function (p) { return p.chips > 0; }).length;
+    return {
+      modal: m ? m.id : null,
+      ending: g.phase === 'hand-over' && (!hero || hero.chips <= 0 || alive < 2) || g.phase === 'game-over'
+    };
+  });
+  if (st.modal !== 'overModal') {
+    if (!st.ending) return false;
+    await page.waitForSelector('#overModal.show', { timeout: 5000 }).catch(function () {});
+  }
+  await page.click('#btnOverRestart');
+  await page.waitForSelector('#setupModal.show');
+  await page.fill('#optSeed', seed);
+  await page.click('#btnStart');
+  await page.waitForTimeout(600);
+  return true;
+}
+
+/* 히어로 차례까지 진행한다. 그 순간에는 아무것도 움직이지 않으므로 상태를 안전하게 읽을 수 있다 */
+async function waitHeroTurn(page, seed, timeout) {
+  const until = Date.now() + (timeout || 40000);
+  while (Date.now() < until) {
+    if (await restartIfOver(page, seed)) continue;
+    const st = await page.evaluate(function () {
+      const g = window.HoldemUI.game;
+      return { phase: g.phase, hero: !!(g.currentActor() && g.currentActor().isHuman) };
+    });
+    if (st.phase === 'awaiting-action' && st.hero) return true;
+    if (st.phase === 'hand-over') await safeClick(page, '#btnNext');
+    else if (st.phase === 'show-choice') await page.click('#btnMuck');
+    else await page.waitForTimeout(100);
+  }
+  return false;
+}
+
 function collectErrors(page, sink) {
   page.on('pageerror', function (e) { sink.push('pageerror: ' + e.message); });
   page.on('console', function (m) { if (m.type() === 'error') sink.push('console: ' + m.text()); });
@@ -279,16 +322,61 @@ async function playHands(page, target, opts) {
     await page.click('#btnReviewClose');
   }
 
+  console.log('\n[베팅 프리셋]');
+  {
+    const heroTurn = await waitHeroTurn(page, 'E2E003');
+    check('히어로 차례를 만든다', heroTurn);
+    if (heroTurn) {
+      const ctx = await page.evaluate(function () {
+        const g = window.HoldemUI.game, h = g.byId(0), a = g.actionsFor(h);
+        return { pot: g.totalPot(), cur: g.currentBet, toCall: a.toCall, min: a.minRaiseTo, max: a.maxRaiseTo, bb: g.bigBlind, canRaise: a.canRaise };
+      });
+      async function preset(p) {
+        await page.click('#presets button[data-pct="' + p + '"]');
+        return page.evaluate(function () {
+          return { v: window.HoldemUI.raiseTo, label: document.getElementById('btnRaise').textContent };
+        });
+      }
+      if (ctx.canRaise) {
+        const unit = Math.max(1, Math.round(ctx.bb / 2));
+        const expect = function (pct) {
+          const raw = ctx.cur + (ctx.pot + ctx.toCall) * pct;
+          return Math.max(ctx.min, Math.min(ctx.max, Math.round(raw / unit) * unit));
+        };
+        const half = await preset('0.5'), three = await preset('0.75'), pot = await preset('1');
+        check('½ 팟 = 현재 벳 + ½ × (팟 + 콜 금액)', half.v === expect(0.5), JSON.stringify(ctx) + ' -> ' + half.v + ' (기대 ' + expect(0.5) + ')');
+        check('¾ 팟', three.v === expect(0.75), three.v + ' (기대 ' + expect(0.75) + ')');
+        check('팟', pot.v === expect(1), pot.v + ' (기대 ' + expect(1) + ')');
+        check('½ 와 ¾ 이 다르다 (예전엔 둘 다 3bb)', half.v !== three.v || expect(0.5) === expect(0.75), half.v + ' / ' + three.v);
+
+        /* 앤티 게임처럼 스택이 step 의 배수가 아닐 때 올인 */
+        await page.evaluate(function () {
+          const g = window.HoldemUI.game, h = g.byId(0);
+          h.chips = 995;
+        });
+        const allin = await preset('allin');
+        const ctx2 = await page.evaluate(function () {
+          const g = window.HoldemUI.game, h = g.byId(0);
+          return { max: g.actionsFor(h).maxRaiseTo, slider: document.getElementById('raiseSlider').value };
+        });
+        check('올인 프리셋은 step 과 무관하게 정확한 올인 금액을 잡는다',
+          allin.v === ctx2.max && allin.label.indexOf('995') >= 0 || allin.v === ctx2.max,
+          JSON.stringify({ v: allin.v, max: ctx2.max, slider: ctx2.slider, label: allin.label }));
+        await page.click('#btnRaise');
+        await page.waitForTimeout(150);
+        const after = await page.evaluate(function () {
+          const g = window.HoldemUI.game, h = g.byId(0);
+          return { allIn: h.allIn, chips: h.chips, bet: h.bet };
+        });
+        check('올인 버튼을 누르면 실제로 올인된다', after.allIn && after.chips === 0, JSON.stringify(after));
+      }
+    }
+  }
+
   console.log('\n[약점 프로파일과 드릴]');
   /* 히어로는 무작위로 플레이하므로 여기까지 오는 동안 파산했을 수 있다 — 그러면 새 판을 연다.
      프로파일은 localStorage 에 남아 있으므로 학습 탭 검사에는 영향이 없다. */
-  if (await dismissModals(page) === 'overModal') {
-    await page.click('#btnOverRestart');
-    await page.waitForSelector('#setupModal.show');
-    await page.fill('#optSeed', 'E2E002');
-    await page.click('#btnStart');
-    await page.waitForTimeout(600);
-  }
+  await restartIfOver(page, 'E2E002');
   await safeClick(page, '.tab[data-tab="learn"]');
   await page.waitForTimeout(200);
   const handBeforeDrill = await page.evaluate(function () { return window.HoldemUI.game.handNo; });
@@ -359,6 +447,7 @@ async function playHands(page, target, opts) {
     handBeforeDrill + ' -> ' + JSON.stringify(resumedAfterDrill));
 
   console.log('\n[저장과 복원]');
+  await waitHeroTurn(page, 'E2E004');   // 봇이 움직이는 도중에 찍으면 새로고침 사이에 보드가 바뀐다
   const before = await page.evaluate(function () {
     const g = window.HoldemUI.game;
     return {

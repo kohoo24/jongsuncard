@@ -57,7 +57,8 @@
     seatPos: {}, dealOrder: {}, dealing: false, deckSig: '', deckAt: null,
     tab: 'log', chartState: { position: 'BTN', playerCount: 6, heroKey: null, userPicked: false },
     sound: true, winningCards: [], busy: false,
-    profile: null, drill: null
+    profile: null, drill: null,
+    raiseTo: 0     // 레이즈 목표 금액 — 슬라이더는 step 에 맞춰 값을 깎으므로 정확한 값은 따로 든다
   };
   global.HoldemUI = state;
 
@@ -737,15 +738,29 @@
     if (a.canRaise) {
       slider.min = a.minRaiseTo;
       slider.max = a.maxRaiseTo;
-      slider.step = Math.max(1, Math.round(g.bigBlind / 2));
-      const cur = parseInt(slider.value, 10);
+      slider.step = raiseUnit(g);
+      const cur = state.raiseTo;
       if (!cur || cur < a.minRaiseTo || cur > a.maxRaiseTo) {
-        const target = Math.round((g.currentBet + g.totalPot() * 0.6) / g.bigBlind) * g.bigBlind;
-        slider.value = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, target));
+        setRaiseTo(g, a, g.currentBet + (g.totalPot() + a.toCall) * 0.6);
+      } else {
+        slider.value = cur;
       }
       slider.disabled = false;
     } else slider.disabled = true;
     updateRaiseLabel();
+  }
+
+  function raiseUnit(g) { return Math.max(1, Math.round(g.bigBlind / 2)); }
+
+  /* 목표 금액을 정한다. 슬라이더는 step 에 맞춰 값을 깎을 수 있으므로 정확한 값은 state 에 둔다.
+     (앤티가 있으면 스택이 10의 배수가 아니라 올인 금액이 step 에 안 맞는다) */
+  function setRaiseTo(g, a, v, exact) {
+    const unit = raiseUnit(g);
+    if (!exact) v = Math.round(v / unit) * unit;
+    v = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, Math.round(v)));
+    state.raiseTo = v;
+    $('raiseSlider').value = v;
+    return v;
   }
 
   function updateRaiseLabel() {
@@ -753,7 +768,7 @@
     const hero = g.byId(HERO_ID);
     if (!hero) return;
     const a = g.actionsFor(hero);
-    const v = parseInt($('raiseSlider').value, 10) || a.minRaiseTo;
+    const v = state.raiseTo || a.minRaiseTo;
     const key = v >= a.maxRaiseTo ? 'ctl.allin' : (a.isBet ? 'ctl.bet' : 'ctl.raise');
     $('btnRaise').querySelector('span').textContent = T(key, { amount: num(v) });
   }
@@ -1025,6 +1040,7 @@
     state.winningCards = [];
     state.reviewItems = [];
     state.handFinalized = false;
+    state.raiseTo = 0;
     state.chartState.userPicked = false;
     g.startHand();
     if (g.phase === 'game-over') { loop(); return; }
@@ -1071,6 +1087,7 @@
     state.winningCards = [];
     state.communityRendered = 0;
     state.handFinalized = false;
+    state.raiseTo = 0;
     state.dealing = false;
     state.chartState.userPicked = false;
     $('community').innerHTML = '';
@@ -1392,6 +1409,7 @@
     state.winningCards = [];
     state.communityRendered = 0;
     state.handFinalized = false;
+    state.raiseTo = 0;
     $('community').innerHTML = '';
     H.equity.initWorker();
 
@@ -1494,9 +1512,16 @@
       heroAct({ type: g.actionsFor(hero).canCheck ? 'check' : 'call' });
     });
     $('btnRaise').addEventListener('click', function () {
-      heroAct({ type: 'raise', amount: parseInt($('raiseSlider').value, 10) });
+      const g = state.game, hero = g.byId(HERO_ID);
+      if (!hero) return;
+      const a = g.actionsFor(hero);
+      const v = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, state.raiseTo || a.minRaiseTo));
+      heroAct({ type: 'raise', amount: v });
     });
-    $('raiseSlider').addEventListener('input', updateRaiseLabel);
+    $('raiseSlider').addEventListener('input', function () {
+      state.raiseTo = parseInt($('raiseSlider').value, 10) || 0;
+      updateRaiseLabel();
+    });
     $('btnNext').addEventListener('click', nextHand);
     $('btnAddon').addEventListener('click', function () {
       state.game.addon(HERO_ID);
@@ -1527,15 +1552,15 @@
         const g = state.game, hero = g.byId(HERO_ID);
         if (!hero) return;
         const a = g.actionsFor(hero);
+        if (!a.canRaise) return;
         const p = b.dataset.pct;
-        let v;
-        if (p === 'allin') v = a.maxRaiseTo;
-        else if (p === 'min') v = a.minRaiseTo;
+        if (p === 'allin') setRaiseTo(g, a, a.maxRaiseTo, true);
+        else if (p === 'min') setRaiseTo(g, a, a.minRaiseTo, true);
         else {
-          const pot = g.totalPot();
-          v = Math.round((g.currentBet + a.toCall + pot * parseFloat(p)) / g.bigBlind) * g.bigBlind;
+          /* "팟의 x%" 레이즈 = 현재 벳 + x × (팟 + 내가 콜할 금액). 예전 공식은 콜 금액을
+             한 번 더 더하고 bb 단위로 반올림해 ½ 과 ¾ 이 같은 금액(3bb)이 됐다. */
+          setRaiseTo(g, a, g.currentBet + (g.totalPot() + a.toCall) * parseFloat(p));
         }
-        $('raiseSlider').value = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, v));
         updateRaiseLabel();
       });
     });
