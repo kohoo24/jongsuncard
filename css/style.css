@@ -709,17 +709,27 @@ kbd {
   border: 1px solid currentColor; border-radius: 4px; padding: 0 4px;
 }
 
-.raise-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
-#raiseSlider { flex: 1; min-width: 150px; accent-color: var(--gold); height: 24px; }
-.presets { display: flex; gap: 5px; }
+.raise-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+#raiseSlider { flex: 1 1 160px; min-width: 140px; accent-color: var(--gold); height: 24px; }
+#raiseInput {
+  width: 96px; flex: none;
+  background: rgba(255, 255, 255, .06); border: 1px solid var(--line); color: var(--text);
+  border-radius: 8px; padding: 7px 9px; font-size: 13px; font-family: inherit; text-align: right;
+  -moz-appearance: textfield;
+}
+#raiseInput::-webkit-outer-spin-button, #raiseInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#raiseInput:focus { outline: 1px solid var(--gold); }
+.presets { display: flex; gap: 5px; flex-wrap: wrap; }
 .presets button {
   background: rgba(255, 255, 255, .06);
   border: 1px solid var(--line);
   color: var(--text);
   border-radius: 8px; padding: 7px 9px;
   font-size: 12px; cursor: pointer; font-family: inherit;
+  min-width: 44px;
 }
 .presets button:hover { background: rgba(255, 255, 255, .14); }
+.presets button.on { border-color: var(--gold); color: var(--gold); }
 .waiting { text-align: center; color: var(--muted); font-size: 13px; padding: 14px 0; }
 
 /* ---------- 모달 ---------- */

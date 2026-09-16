@@ -331,30 +331,64 @@ async function playHands(page, target, opts) {
         const g = window.HoldemUI.game, h = g.byId(0), a = g.actionsFor(h);
         return { pot: g.totalPot(), cur: g.currentBet, toCall: a.toCall, min: a.minRaiseTo, max: a.maxRaiseTo, bb: g.bigBlind, canRaise: a.canRaise };
       });
-      async function preset(p) {
-        await page.click('#presets button[data-pct="' + p + '"]');
+      async function preset(sel) {
+        await page.click('#presets button' + sel);
         return page.evaluate(function () {
           return { v: window.HoldemUI.raiseTo, label: document.getElementById('btnRaise').textContent };
         });
       }
       if (ctx.canRaise) {
         const unit = Math.max(1, Math.round(ctx.bb / 2));
-        const expect = function (pct) {
-          const raw = ctx.cur + (ctx.pot + ctx.toCall) * pct;
+        const clampRound = function (raw) {
           return Math.max(ctx.min, Math.min(ctx.max, Math.round(raw / unit) * unit));
         };
-        const half = await preset('0.5'), three = await preset('0.75'), pot = await preset('1');
-        check('½ 팟 = 현재 벳 + ½ × (팟 + 콜 금액)', half.v === expect(0.5), JSON.stringify(ctx) + ' -> ' + half.v + ' (기대 ' + expect(0.5) + ')');
-        check('¾ 팟', three.v === expect(0.75), three.v + ' (기대 ' + expect(0.75) + ')');
-        check('팟', pot.v === expect(1), pot.v + ' (기대 ' + expect(1) + ')');
-        check('½ 와 ¾ 이 다르다 (예전엔 둘 다 3bb)', half.v !== three.v || expect(0.5) === expect(0.75), half.v + ' / ' + three.v);
+        const buttons = await page.$$eval('#presets button', function (bs) {
+          return bs.map(function (b) { return { kind: b.dataset.kind, v: parseFloat(b.dataset.v), text: b.textContent }; });
+        });
+        check('스마트 벳 버튼이 상황에 맞게 그려진다 (5개 이상, 올인 포함)',
+          buttons.length >= 5 && buttons.some(function (b) { return b.kind === 'allin'; }), JSON.stringify(buttons));
+        const limpers = await page.evaluate(function () {
+          let n = 0;
+          window.HoldemUI.game.handActions.forEach(function (x) { if (x.street === 'preflop' && x.type === 'call' && x.raisesBefore <= 1) n++; });
+          return n;
+        });
+        let allOk = true, detail = [];
+        for (let i = 0; i < buttons.length; i++) {
+          const b = buttons[i];
+          if (b.kind === 'allin') continue;
+          const raw = b.kind === 'x' ? ctx.bb * b.v + ctx.bb * limpers
+            : b.kind === 'r' ? ctx.cur * b.v
+              : ctx.cur + (ctx.pot + ctx.toCall) * b.v;
+          const got = await preset('[data-kind="' + b.kind + '"][data-v="' + b.v + '"]');
+          const want = clampRound(raw);
+          if (got.v !== want) { allOk = false; detail.push(b.text + ': ' + got.v + ' (기대 ' + want + ')'); }
+        }
+        check('프리셋 금액 = 종류별 공식 (bb 배수 / 상대 벳 배수 / 현재 벳 + x × (팟 + 콜))', allOk, JSON.stringify(ctx) + ' ' + detail.join(', '));
+        const pcts = buttons.filter(function (b) { return b.kind === 'p'; });
+        if (pcts.length >= 2) {
+          const a1 = await preset('[data-kind="p"][data-v="' + pcts[0].v + '"]');
+          const a2 = await preset('[data-kind="p"][data-v="' + pcts[1].v + '"]');
+          check('서로 다른 비율은 다른 금액 (예전엔 ½ 과 ¾ 이 둘 다 3bb)', a1.v !== a2.v || clampRound(ctx.cur + (ctx.pot + ctx.toCall) * pcts[0].v) === clampRound(ctx.cur + (ctx.pot + ctx.toCall) * pcts[1].v), a1.v + ' / ' + a2.v);
+        }
+
+        /* 직접 입력 */
+        const typed = Math.min(ctx.max, ctx.min + unit * 3);
+        await page.fill('#raiseInput', String(typed));
+        const afterType = await page.evaluate(function () { return window.HoldemUI.raiseTo; });
+        check('금액을 직접 입력하면 그 값이 목표가 된다', afterType === typed, afterType + ' (기대 ' + typed + ')');
+        await page.fill('#raiseInput', String(ctx.max * 5));
+        await page.press('#raiseInput', 'Tab');
+        const clamped = await page.evaluate(function () {
+          return { v: window.HoldemUI.raiseTo, shown: document.getElementById('raiseInput').value };
+        });
+        check('범위 밖 입력은 확정할 때 보정된다', clamped.v === ctx.max && clamped.shown === String(ctx.max), JSON.stringify(clamped));
 
         /* 앤티 게임처럼 스택이 step 의 배수가 아닐 때 올인 */
         await page.evaluate(function () {
           const g = window.HoldemUI.game, h = g.byId(0);
           h.chips = 995;
         });
-        const allin = await preset('allin');
+        const allin = await preset('[data-kind="allin"]');
         const ctx2 = await page.evaluate(function () {
           const g = window.HoldemUI.game, h = g.byId(0);
           return { max: g.actionsFor(h).maxRaiseTo, slider: document.getElementById('raiseSlider').value };

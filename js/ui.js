@@ -746,11 +746,101 @@
         slider.value = cur;
       }
       slider.disabled = false;
-    } else slider.disabled = true;
+      $('raiseInput').disabled = false;
+      $('raiseInput').min = a.minRaiseTo;
+      $('raiseInput').max = a.maxRaiseTo;
+      $('raiseInput').placeholder = T('ctl.amount');
+      renderPresets(g, a);
+    } else {
+      slider.disabled = true;
+      $('raiseInput').disabled = true;
+    }
     updateRaiseLabel();
   }
 
   function raiseUnit(g) { return Math.max(1, Math.round(g.bigBlind / 2)); }
+
+  /*
+   * 스마트 벳 버튼. 상황마다 쓰는 단위가 다르다:
+   *   프리플랍 오픈      bb 배수 (2x · 2.5x · 3x, 림퍼 한 명당 +1bb)
+   *   프리플랍 레이즈 직면 상대 벳 배수 (2.5x · 3x · 4x)
+   *   포스트플랍          팟 비율 (33% · 50% · 75% · 100% · 150%)
+   * 거기에 팟(프리플랍)과 올인.
+   */
+  function presetSpec(g, a) {
+    if (g.street === 'preflop') {
+      if (g.raisesThisStreet <= 1) {
+        return { title: T('ctl.presetsOpen'), items: [
+          { kind: 'x', v: 2, label: '2x' }, { kind: 'x', v: 2.5, label: '2.5x' }, { kind: 'x', v: 3, label: '3x' },
+          { kind: 'p', v: 1, label: T('ctl.pot') }, { kind: 'allin', label: T('act.allin') }
+        ] };
+      }
+      return { title: T('ctl.presetsRaise'), items: [
+        { kind: 'r', v: 2.5, label: '2.5x' }, { kind: 'r', v: 3, label: '3x' }, { kind: 'r', v: 4, label: '4x' },
+        { kind: 'p', v: 1, label: T('ctl.pot') }, { kind: 'allin', label: T('act.allin') }
+      ] };
+    }
+    return { title: T('ctl.presetsPot'), items: [
+      { kind: 'p', v: 0.33, label: '33%' }, { kind: 'p', v: 0.5, label: '50%' }, { kind: 'p', v: 0.75, label: '75%' },
+      { kind: 'p', v: 1, label: '100%' }, { kind: 'p', v: 1.5, label: '150%' }, { kind: 'allin', label: T('act.allin') }
+    ] };
+  }
+
+  function countLimpers(g) {
+    let n = 0;
+    g.handActions.forEach(function (x) { if (x.street === 'preflop' && x.type === 'call' && x.raisesBefore <= 1) n++; });
+    return n;
+  }
+
+  /* 프리셋 하나가 가리키는 금액 (반올림 전) */
+  function presetTarget(g, a, kind, v) {
+    if (kind === 'allin') return a.maxRaiseTo;
+    if (kind === 'x') return g.bigBlind * v + g.bigBlind * countLimpers(g);
+    if (kind === 'r') return g.currentBet * v;
+    /* "팟의 x%" 레이즈 = 현재 벳 + x × (팟 + 내가 콜할 금액). 예전 공식은 콜 금액을
+       한 번 더 더하고 bb 단위로 반올림해 ½ 과 ¾ 이 같은 금액(3bb)이 됐다. */
+    return g.currentBet + (g.totalPot() + a.toCall) * v;
+  }
+
+  function renderPresets(g, a) {
+    const spec = presetSpec(g, a);
+    const host = $('presets');
+    const sigNow = spec.items.map(function (it) { return it.kind + it.v; }).join(',');
+    if (host.dataset.sig !== sigNow) {
+      host.dataset.sig = sigNow;
+      host.innerHTML = '';
+      spec.items.forEach(function (it) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.dataset.kind = it.kind;
+        if (it.v != null) b.dataset.v = String(it.v);
+        b.textContent = it.label;
+        b.addEventListener('click', function () {
+          const gg = state.game, hero = gg.byId(HERO_ID);
+          if (!hero) return;
+          const aa = gg.actionsFor(hero);
+          if (!aa.canRaise) return;
+          setRaiseTo(gg, aa, presetTarget(gg, aa, it.kind, it.v), it.kind === 'allin');
+          updateRaiseLabel();
+        });
+        host.appendChild(b);
+      });
+    }
+    host.setAttribute('aria-label', spec.title);
+    host.title = spec.title;
+    markPreset(g, a);
+  }
+
+  /* 현재 금액과 일치하는 프리셋을 표시한다 */
+  function markPreset(g, a) {
+    Array.prototype.forEach.call($('presets').children, function (b) {
+      const unit = raiseUnit(g);
+      let t = presetTarget(g, a, b.dataset.kind, parseFloat(b.dataset.v));
+      if (b.dataset.kind !== 'allin') t = Math.round(t / unit) * unit;
+      t = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, Math.round(t)));
+      b.classList.toggle('on', t === state.raiseTo);
+    });
+  }
 
   /* 목표 금액을 정한다. 슬라이더는 step 에 맞춰 값을 깎을 수 있으므로 정확한 값은 state 에 둔다.
      (앤티가 있으면 스택이 10의 배수가 아니라 올인 금액이 step 에 안 맞는다) */
@@ -760,6 +850,7 @@
     v = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, Math.round(v)));
     state.raiseTo = v;
     $('raiseSlider').value = v;
+    if (document.activeElement !== $('raiseInput')) $('raiseInput').value = v;
     return v;
   }
 
@@ -771,6 +862,7 @@
     const v = state.raiseTo || a.minRaiseTo;
     const key = v >= a.maxRaiseTo ? 'ctl.allin' : (a.isBet ? 'ctl.bet' : 'ctl.raise');
     $('btnRaise').querySelector('span').textContent = T(key, { amount: num(v) });
+    if (a.canRaise) markPreset(g, a);
   }
 
   function showBanner() {
@@ -1291,12 +1383,10 @@
       { value: 'normal', label: T('setup.diffNormal') + ' — ' + T('setup.diffNormalDesc') },
       { value: 'hard', label: T('setup.diffHard') + ' — ' + T('setup.diffHardDesc') }
     ], s.difficulty);
-    fillSelect('optChips', [500, 1000, 2000, 5000].map(function (v) {
-      return { value: v, label: v.toLocaleString() };
-    }), s.chips);
     fillSelect('optBlinds', [5, 10, 25].map(function (v) {
       return { value: v, label: v + ' / ' + v * 2 };
     }), s.blind);
+    fillChipsSelect(s.chips);
     fillSelect('optStructure', [
       { value: 0, label: T('setup.structFixed') },
       { value: 20, label: T('setup.structSlow') },
@@ -1329,6 +1419,19 @@
     $('optRebuy').checked = s.allowRebuy;
     applyI18nText();
     $('btnResume').hidden = !H.storage.loadSession();
+  }
+
+  /* 시작 칩은 블라인드에 따라 "1,000 (50bb)" 처럼 깊이를 병기한다 */
+  function fillChipsSelect(selected) {
+    const bb = parseInt($('optBlinds').value, 10) * 2 || 20;
+    const cur = selected != null ? selected : parseInt($('optChips').value, 10);
+    fillSelect('optChips', [500, 1000, 2000, 5000].map(function (v) {
+      const depth = v / bb;
+      return {
+        value: v,
+        label: T('setup.chipsBb', { chips: v.toLocaleString(), bb: Number.isInteger(depth) ? depth : depth.toFixed(1) })
+      };
+    }), cur);
   }
 
   function readSetup() {
@@ -1520,7 +1623,36 @@
     });
     $('raiseSlider').addEventListener('input', function () {
       state.raiseTo = parseInt($('raiseSlider').value, 10) || 0;
+      $('raiseInput').value = state.raiseTo;
       updateRaiseLabel();
+    });
+    /* 직접 입력: 치는 동안은 그대로 두고, 확정(변경·Enter)할 때 범위로 보정한다 */
+    $('raiseInput').addEventListener('input', function () {
+      const g = state.game, hero = g && g.byId(HERO_ID);
+      if (!hero) return;
+      const a = g.actionsFor(hero);
+      const v = parseInt($('raiseInput').value, 10);
+      if (!isFinite(v)) return;
+      state.raiseTo = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, v));
+      $('raiseSlider').value = state.raiseTo;
+      updateRaiseLabel();
+    });
+    function commitRaiseInput() {
+      const g = state.game, hero = g && g.byId(HERO_ID);
+      if (!hero) return;
+      const a = g.actionsFor(hero);
+      const v = parseInt($('raiseInput').value, 10);
+      setRaiseTo(g, a, isFinite(v) ? v : a.minRaiseTo, true);
+      $('raiseInput').value = state.raiseTo;
+      updateRaiseLabel();
+    }
+    $('raiseInput').addEventListener('change', commitRaiseInput);
+    $('raiseInput').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commitRaiseInput();
+        if (!$('btnRaise').disabled) $('btnRaise').click();
+      }
     });
     $('btnNext').addEventListener('click', nextHand);
     $('btnAddon').addEventListener('click', function () {
@@ -1547,28 +1679,11 @@
       state.game.chooseShow(false); render(); loop();
     });
 
-    Array.prototype.forEach.call(document.querySelectorAll('#presets button'), function (b) {
-      b.addEventListener('click', function () {
-        const g = state.game, hero = g.byId(HERO_ID);
-        if (!hero) return;
-        const a = g.actionsFor(hero);
-        if (!a.canRaise) return;
-        const p = b.dataset.pct;
-        if (p === 'allin') setRaiseTo(g, a, a.maxRaiseTo, true);
-        else if (p === 'min') setRaiseTo(g, a, a.minRaiseTo, true);
-        else {
-          /* "팟의 x%" 레이즈 = 현재 벳 + x × (팟 + 내가 콜할 금액). 예전 공식은 콜 금액을
-             한 번 더 더하고 bb 단위로 반올림해 ½ 과 ¾ 이 같은 금액(3bb)이 됐다. */
-          setRaiseTo(g, a, g.currentBet + (g.totalPot() + a.toCall) * parseFloat(p));
-        }
-        updateRaiseLabel();
-      });
-    });
-
     Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (b) {
       b.addEventListener('click', function () { switchTab(b.dataset.tab); });
     });
 
+    $('optBlinds').addEventListener('change', function () { fillChipsSelect(null); });
     $('optLang').addEventListener('change', function () {
       H.i18n.setLang($('optLang').value);
       buildSetup();

@@ -65,13 +65,8 @@
 
       <div class="raise-row" id="raiseRow">
         <input type="range" id="raiseSlider" aria-label="레이즈 금액">
-        <div class="presets" id="presets">
-          <button data-pct="min" data-i18n="ctl.min">최소</button>
-          <button data-pct="0.5">&frac12;</button>
-          <button data-pct="0.75">&frac34;</button>
-          <button data-pct="1" data-i18n="ctl.pot">팟</button>
-          <button data-pct="allin" data-i18n="act.allin">올인</button>
-        </div>
+        <input type="number" id="raiseInput" inputmode="numeric" pattern="[0-9]*" aria-label="레이즈 금액 직접 입력" min="0" step="1">
+        <div class="presets" id="presets" role="group" aria-label="스마트 벳"></div>
       </div>
 
       <div class="btn-row" id="showRow">
