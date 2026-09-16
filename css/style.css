@@ -848,6 +848,49 @@ kbd {
   .street-label { display: none; }
   .seat .think { display: none; }
 }
+/*
+ * 낮은 펠트 (모바일 세로: 330px 안팎, 가로: 200px 안팎).
+ * "카드 위 · 플레이트 아래" 구조의 봇 좌석(95px)은 팟·보드와 부딪히므로 카드를 플레이트 옆에
+ * 붙여 46px 로 압축하고, 좌석 행과 보드의 y 는 ui.js 가 실제 높이로 계산한다.
+ */
+.felt.short .seat.bot { display: flex; align-items: center; gap: 4px; width: auto; }
+.felt.short .seat.bot .cards { min-height: 0; margin: 0; flex: none; }
+.felt.short .seat.bot .plate { width: 100px; }
+.felt.short .seat.bot .card.small { width: 26px; height: 37px; }
+.felt.short .seat.bot .card.small .r { font-size: 10px; }
+.felt.short .seat.bot .card.small .s { font-size: 9px; }
+.felt.short .seat .think { display: none; }
+.felt.short .table-center { transform: translate(-50%, 0); }
+.felt.short .pots { margin-bottom: 5px; }
+.felt.short .street-label { display: none; }
+/* 히어로 압축(세로): 양옆 좌석이 히어로 행 위로 올라오므로 그 배지는 안쪽으로 붙인다 */
+.felt.short.hcompact:not(.land) .seat.bottom.bot .bet { top: 50%; bottom: auto; left: 100%; transform: translate(4px, -50%); }
+.felt.short.hcompact:not(.land) .seat.bottom.bot.right .bet { left: auto; right: 100%; transform: translate(-4px, -50%); }
+/* 봇의 뒷면 카드는 그리지 않는다 — 폴드는 흐림으로 구분되고, 공개된 카드만 플레이트 옆에 붙는다 */
+.felt.short .seat.bot .card.back { display: none; }
+.felt.short .seat.bot .cards:empty { display: none; }
+/* 히어로 압축: 카드를 플레이트 옆에 (가로는 항상, 세로는 공간이 모자랄 때) */
+.felt.short.hcompact .seat.hero { display: flex; align-items: center; gap: 6px; width: auto; }
+.felt.short.hcompact .seat.hero .cards { min-height: 0; margin: 0; flex: none; }
+.felt.short.hcompact .seat.hero .plate { width: 120px; }
+/* 가로: 팟은 보드 옆에, 상단 좌석의 베팅 배지는 플레이트 옆에 */
+.felt.short.land { --card-w: 40px; --card-h: 56px; }
+.felt.short.land .seat.top .bet { bottom: auto; top: 50%; left: 100%; transform: translate(4px, -50%); }
+.felt.short.land .seat.bottom .bet { top: auto; bottom: 50%; left: 100%; transform: translate(4px, 50%); }
+.felt.short.land .table-center { display: flex; align-items: center; justify-content: center; gap: 10px; width: auto; }
+.felt.short.land .pots { margin: 0; }
+.felt.short.land .street-label { display: none; }
+
+@media (max-height: 640px) and (orientation: landscape) {
+  /* 컨트롤을 두 줄로: 버튼 한 줄, 슬라이더·입력·프리셋 한 줄 — 펠트에 높이를 돌려준다 */
+  .hero-readout { display: none; }
+  .raise-row { margin-top: 6px; flex-wrap: nowrap; }
+  #raiseSlider { flex: 1 1 120px; min-width: 100px; }
+  .presets { width: auto; flex-wrap: nowrap; }
+  .presets button { flex: none; padding: 6px 7px; font-size: 11px; min-width: 0; }
+  .drill-hint { padding: 2px 0 6px; font-size: 12px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .card, .fly-chip, .seat .avatar, .deck { animation: none !important; transition: none !important; }
 }

@@ -16,7 +16,7 @@
   };
   /* 좁은 화면에서는 측면 좌석의 카드가 커뮤니티 카드와 겹치므로 위아래로 더 벌린다 */
   const SEAT_POS_NARROW = {
-    2: [[50, 88], [50, 14]],
+    2: [[50, 88], [50, 12]],
     3: [[50, 88], [16, 26], [84, 26]],
     4: [[50, 88], [15, 62], [50, 13], [85, 62]],
     5: [[50, 88], [14, 64], [24, 14], [76, 14], [86, 64]],
@@ -99,7 +99,7 @@
   function cardEl(card, opts) {
     opts = opts || {};
     const e = document.createElement('div');
-    e.className = 'card' + (opts.small ? ' small' : '');
+    e.className = 'card' + (opts.small ? ' small' : '') + (card ? '' : ' back');
     if (!card) {
       e.appendChild(H.cardart.back());
       e.setAttribute('aria-label', T('card.back'));
@@ -149,7 +149,7 @@
       const xy = pos[i] || [50, 50];
       const x = xy[0];
       const seat = document.createElement('div');
-      seat.className = 'seat ' + (xy[1] > 50 ? 'bottom' : 'top');
+      seat.className = 'seat ' + (xy[1] > 50 ? 'bottom' : 'top') + (p.isHuman ? ' hero' : ' bot');
       seat.style.left = x + '%';
       seat.style.top = xy[1] + '%';
 
@@ -188,7 +188,7 @@
       seat.appendChild(bet); seat.appendChild(badge); seat.appendChild(think);
       wrap.appendChild(seat);
 
-      state.seatPos[p.id] = { x: x, y: xy[1], idx: i };
+      state.seatPos[p.id] = { x: x, y: xy[1], x0: x, y0: xy[1], idx: i };
       state.seatEls[p.id] = {
         root: seat, cards: cards, name: name, chips: chips, last: last,
         bet: bet, badge: badge, think: think, ring: ring, avatar: av,
@@ -196,10 +196,107 @@
       };
     });
     buildDeck();
+    state.feltLayoutSig = '';
+    layoutSeats(true);
     positionDeck(true);
   }
 
-  /* ==================== 덱과 딜링 ==================== */
+  /*
+   * 낮은 펠트용 배치. 봇은 위쪽 한 줄(T) 또는 히어로 양옆(B)에, 히어로는 아래 중앙에.
+   * 좌석 행의 y 와 보드의 y 를 실제 픽셀로 계산해 팟·보드와 부딪히지 않게 한다.
+   * 펠트가 충분히 높으면(데스크톱) 퍼센트 표를 그대로 쓴다.
+   */
+  const SHORT_SLOTS = {
+    2: ['T50'],
+    3: ['T30', 'T70'],
+    4: ['T18', 'T50', 'T82'],
+    5: ['B15', 'T28', 'T72', 'B85'],
+    6: ['B15', 'T16', 'T50', 'T84', 'B85']
+  };
+  /* 좁은 화면은 퍼센트 표가 520px 까지도 팟과 부딪히므로 계산 배치를 더 넓게 쓴다 */
+  function shortMaxH() { return global.innerWidth < 720 ? 520 : 430; }
+
+  function layoutSeats(force) {
+    const g = state.game;
+    if (!g) return;
+    const felt = $('felt');
+    const fh = felt.clientHeight, fw = felt.clientWidth;
+    if (!fh || !fw) return;
+    const short = fh < shortMaxH();
+    const land = short && global.innerWidth > global.innerHeight;
+    felt.classList.toggle('short', short);
+    felt.classList.toggle('land', land);
+    const center = felt.querySelector('.table-center');
+    const heroEl = state.seatEls[state.seatOrder[0].id];
+
+    /* 높이는 가정하지 않고 잰다 — 플레이트는 이름·칩·마지막 액션 세 줄이라 폰트에 따라 다르고,
+       리사이즈 직후에는 카드가 아직 없어 작게 나온다. 잰 값을 서명에 넣어 채워지면 다시 배치한다. */
+    let botBlock = 44;
+    state.seatOrder.forEach(function (p, i) {
+      if (i > 0 && state.seatEls[p.id]) botBlock = Math.max(botBlock, state.seatEls[p.id].root.offsetHeight);
+    });
+    const hadCompact = felt.classList.contains('hcompact');
+    if (hadCompact) felt.classList.remove('hcompact');
+    const heroTall = heroEl ? heroEl.root.offsetHeight : 112;
+    if (hadCompact) felt.classList.add('hcompact');
+
+    const sig = [short, land, fh, fw, g.players.length, botBlock, heroTall].join(':');
+    if (!force && sig === state.feltLayoutSig) return;
+    state.feltLayoutSig = sig;
+
+    if (!short) {
+      felt.classList.remove('hcompact');
+      center.style.top = '';
+      state.seatOrder.forEach(function (p) {
+        const e = state.seatEls[p.id], sp = state.seatPos[p.id];
+        if (!e || !sp) return;
+        e.root.style.left = sp.x0 + '%';
+        e.root.style.top = sp.y0 + '%';
+        sp.x = sp.x0; sp.y = sp.y0;
+        e.root.classList.toggle('top', sp.y0 <= 50);
+        e.root.classList.toggle('bottom', sp.y0 > 50);
+      });
+      return;
+    }
+
+    const cardH = parseFloat(global.getComputedStyle(felt).getPropertyValue('--card-h')) || 63;
+    const badge = 38;                                  // 베팅 배지가 차지하는 높이 (여백 포함)
+    const margin = 6;
+    const potH = 31;
+    const n = g.players.length;
+    const slots = SHORT_SLOTS[n] || SHORT_SLOTS[6];
+    const topCy = margin + botBlock / 2;
+    /* 보드: 상단 좌석(과 배지) 아래부터. 가로에서는 배지가 옆에 붙어 여백이 작다 */
+    const boardTop = topCy + botBlock / 2 + (land ? 6 : badge);
+    const boardBottom = boardTop + (land ? cardH : potH + cardH + 4);   // 낮은 펠트에선 스트리트 라벨을 숨긴다
+    /* 히어로: 카드가 보드에 닿을 만큼 낮으면 카드를 플레이트 옆으로 (가로는 항상) */
+    const hcompact = land || (fh - margin - heroTall < boardBottom + 4);
+    felt.classList.toggle('hcompact', hcompact);
+    const heroH = heroEl ? heroEl.root.offsetHeight : heroTall;
+    const heroCy = fh - margin - heroH / 2;
+    /* 양옆 좌석: 보통은 히어로와 같은 행. 히어로가 압축되면 폭이 넓어져 부딪히므로
+       히어로 행 바로 위(보드와 히어로 사이에 생긴 여유)로 올린다. 가로는 폭이 넉넉하다. */
+    const sideCy = (hcompact && !land) ? heroCy - heroH / 2 - botBlock / 2 - 2 : heroCy - (hcompact ? 0 : 12);
+    center.style.top = boardTop + 'px';
+
+    state.seatOrder.forEach(function (p, i) {
+      const e = state.seatEls[p.id], sp = state.seatPos[p.id];
+      if (!e || !sp) return;
+      let x, cy, top;
+      if (i === 0) { x = 50; cy = heroCy; top = false; }
+      else {
+        const s = slots[i - 1] || 'T50';
+        x = parseInt(s.slice(1), 10);
+        if (s[0] === 'T') { cy = topCy; top = true; } else { cy = sideCy; top = false; }
+      }
+      e.root.style.left = x + '%';
+      e.root.style.top = cy + 'px';
+      e.root.classList.toggle('top', top);
+      e.root.classList.toggle('bottom', !top);
+      e.root.classList.toggle('right', x > 50);
+      sp.x = x; sp.y = cy / fh * 100;
+    });
+  }
   function reducedMotion() {
     try { return global.matchMedia('(prefers-reduced-motion: reduce)').matches; }
     catch (e) { return false; }
@@ -997,10 +1094,12 @@
   function render() {
     if (state.game) H.format.setBigBlind(state.game.bigBlind);
     updateSeats();
+    layoutSeats(false);
     updateBoard();
     updateHeroReadout();
     updateStreetSummary();
     updateControls();
+    layoutSeats(false);
     ensureDeckClear();
     refreshPanel();
   }

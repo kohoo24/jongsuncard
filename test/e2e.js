@@ -595,6 +595,90 @@ async function playHands(page, target, opts) {
   check('콘솔 에러가 없다', errors.length === 0, errors.slice(0, 3).join(' | '));
   await page.close();
 
+  console.log('\n[낮은 펠트: 좌석 · 베팅 배지 · 팟 · 보드 겹침]');
+  /* iOS 사파리는 주소창 때문에 세로 높이가 660 정도까지 줄고, 가로는 펠트가 200px 남짓이다.
+     좌석·카드·베팅 배지가 팟 배지나 보드 카드와 2px 넘게 겹치면 실패. */
+  function measureOverlaps() {
+    const r = function (el) { const b = el.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; };
+    const inter = function (a, b) {
+      const w = Math.min(a.r, b.r) - Math.max(a.l, b.l), h = Math.min(a.b, b.b) - Math.max(a.t, b.t);
+      return (w > 0 && h > 0) ? Math.round(Math.min(w, h)) : 0;
+    };
+    const pots = Array.prototype.map.call(document.querySelectorAll('.pot-badge'), r);
+    const board = Array.prototype.map.call(document.querySelectorAll('#community .card'), r);
+    const felt = r(document.getElementById('felt'));
+    const seats = Array.prototype.slice.call(document.querySelectorAll('.seat'));
+    const bad = [];
+    seats.forEach(function (s, i) {
+      const name = s.querySelector('.name').textContent.trim();
+      const parts = [s.querySelector('.plate'), s.querySelector('.cards'), s.querySelector('.bet')];
+      parts.forEach(function (el) {
+        if (!el || el.classList.contains('hidden')) return;
+        const rc = r(el);
+        if (rc.w < 2 || rc.h < 2) return;
+        const oPot = pots.reduce(function (m, p) { return Math.max(m, inter(rc, p)); }, 0);
+        const oBoard = board.reduce(function (m, c) { return Math.max(m, inter(rc, c)); }, 0);
+        if (oPot > 2) bad.push(name + '/' + el.className + ' 팟 ' + oPot);
+        if (oBoard > 2) bad.push(name + '/' + el.className + ' 보드 ' + oBoard);
+        if (el.classList.contains('plate') && (rc.t < felt.t - 1 || rc.b > felt.b + 1)) bad.push(name + ' 펠트 밖');
+      });
+      seats.slice(i + 1).forEach(function (s2) {
+        const o = inter(r(s.querySelector('.plate')), r(s2.querySelector('.plate')));
+        if (o > 2) bad.push(name + ' x ' + s2.querySelector('.name').textContent.trim() + ' ' + o);
+      });
+    });
+    return bad;
+  }
+  for (const bots of [5, 3, 1]) {
+    const mp = await browser.newPage({ viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true });
+    const mErr = [];
+    collectErrors(mp, mErr);
+    await mp.goto(URL);
+    await mp.waitForSelector('#setupModal.show');
+    await mp.selectOption('#optBots', String(bots));
+    await mp.selectOption('#optSpeed', '350');
+    await mp.selectOption('#optChips', '5000');
+    await mp.uncheck('#optReview');
+    await mp.fill('#optSeed', 'OVL' + bots);
+    await mp.click('#btnStart');
+    await mp.waitForTimeout(500);
+    /* 두 시점에서 잰다: 프리플랍 히어로 차례(블라인드·레이즈 배지 + 팟), 포스트플랍 히어로 차례(보드 + 팟) */
+    async function toHeroTurn(wantPostflop) {
+      const until = Date.now() + 30000;
+      while (Date.now() < until) {
+        const st = await mp.evaluate(function () {
+          const g = window.HoldemUI.game;
+          return { phase: g.phase, street: g.street, hero: !!(g.currentActor() && g.currentActor().isHuman) };
+        });
+        if (st.phase === 'awaiting-action' && st.hero) {
+          if (!wantPostflop || st.street !== 'preflop') return true;
+          await mp.click('#btnCall');
+        } else if (st.phase === 'hand-over') await mp.click('#btnNext');
+        else if (st.phase === 'show-choice') await mp.click('#btnMuck');
+        await mp.waitForTimeout(80);
+      }
+      return false;
+    }
+    const VPS = [[390, 664, 'iPhone 세로(사파리 높이)'], [375, 667, 'iPhone SE'], [360, 640, '작은 안드로이드'], [844, 390, 'iPhone 가로'], [667, 375, 'SE 가로']];
+    for (const stage of ['프리플랍', '포스트플랍']) {
+      const ready = await toHeroTurn(stage === '포스트플랍');
+      check((bots + 1) + '인 ' + stage + ': 히어로 차례를 만든다', ready);
+      if (!ready) continue;
+      const hasBadge = await mp.evaluate(function () { return document.querySelectorAll('.seat .bet:not(.hidden)').length; });
+      if (stage === '프리플랍') check((bots + 1) + '인 프리플랍: 베팅 배지가 보인다', hasBadge > 0, String(hasBadge));
+      for (const vp of VPS) {
+        await mp.setViewportSize({ width: vp[0], height: vp[1] });
+        await mp.waitForTimeout(350);
+        const bad = await mp.evaluate(measureOverlaps);
+        const hs = await mp.evaluate(function () { return document.documentElement.scrollWidth > document.documentElement.clientWidth; });
+        check((bots + 1) + '인 ' + stage + ' ' + vp[2] + ': 겹침 없음', bad.length === 0 && !hs, bad.join(' | ') + (hs ? ' 가로스크롤' : ''));
+      }
+      await mp.setViewportSize({ width: 390, height: 664 });
+    }
+    check((bots + 1) + '인: 콘솔 에러 없음', mErr.length === 0, mErr.slice(0, 2).join(' | '));
+    await mp.close();
+  }
+
   console.log('\n[모바일]');
   for (const [label, vp] of [['세로 390x844', { width: 390, height: 844 }], ['가로 844x390', { width: 844, height: 390 }]]) {
     const mErrors = [];
