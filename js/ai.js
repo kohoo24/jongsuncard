@@ -69,8 +69,17 @@
      * (-12, -11, -10) 같다. 레인지 역산에만 써도 9인에서 +5.1 → -3.8. 둘 다 기본 꺼짐이고,
      * 표는 프리플랍 차트(학습)에 쓴다.
      */
-    solver: false,           // 프리플랍 결정에 솔버 빈도를 쓴다 (보통·고급)
+    solver: false,           // 프리플랍 결정에 항상 솔버 빈도를 쓴다 (보통·고급)
     solverRanges: false,     // 상대 레인지 역산에 솔버 빈도를 가중치로
+    /*
+     * 상황별 전환. 솔버 프리플랍은 타이트한 상대(TAG·락)에게 손해, 루즈한 상대(LAG·밸런스드)에게
+     * 이득이었다. 헤즈업은 6맥스용 콜 기준이 맞지 않아(BB 가 오픈에 70% 폴드, BTN 이 3벳에 92~100%
+     * 폴드) 솔버 헤즈업 표를 쓴다. 그 외에는 프로파일링된 상대 평균 VPIP 가 높으면 솔버.
+     */
+    huSolver: true,          // 헤즈업(2인)은 솔버 표
+    adaptiveSolver: true,    // 고급: 상대 평균 VPIP 가 adaptiveVpip 이상이면 솔버 (표본 adaptiveHands 이상)
+    adaptiveVpip: 0.28,
+    adaptiveHands: 30,
     cbetAware: false,        // 어그레서의 플랍 첫 벳을 넓게 본다 — 단독 +9.0 → +4.5, 효과 없음
     /* 벳 레인지 양극화: 벳은 밸류 + 공기(블러프)이고 중간 핸드는 체크한다. 진단: TAG 의 헤즈업
        C벳은 상위 20% 가 59%, 공기(상위 45% 밖)가 41% 였는데 선형 레인지로 보면 콜당했을 때의
@@ -377,6 +386,30 @@
     return { type: a.canCheck ? 'check' : 'fold' };
   }
 
+  /* 이 자리에서 솔버 프리플랍을 쓸지 */
+  function shouldUseSolver(ctx) {
+    if (TUNE.solver) return true;
+    if (TUNE.huSolver && ctx.n === 2) return true;
+    if (TUNE.adaptiveSolver && ctx.diff.useProfiling && ctx.tracker) {
+      const v = opponentsVpip(ctx);
+      if (v != null && v >= TUNE.adaptiveVpip) return true;
+    }
+    return false;
+  }
+
+  /* 테이블의 다른 플레이어 평균 VPIP (표본이 모자라면 null) */
+  function opponentsVpip(ctx) {
+    let sum = 0, n = 0;
+    for (let i = 0; i < ctx.game.players.length; i++) {
+      const p = ctx.game.players[i];
+      if (p === ctx.player) continue;
+      const st = ctx.tracker.get(p.id);
+      if (!st || st.hands < TUNE.adaptiveHands) return null;
+      sum += st.vpip; n++;
+    }
+    return n ? sum / n : null;
+  }
+
   /* ---------- 레이즈 금액 정리 ---------- */
   function raiseTo(ctx, target) {
     const a = ctx.a, game = ctx.game;
@@ -414,8 +447,8 @@
       return { type: 'fold' };
     }
 
-    /* 솔버 테이블 (보통·고급) */
-    if (diff.useSolver && TUNE.solver && H.preflop && H.preflop.available()) {
+    /* 솔버 테이블 (보통·고급): 항상 / 헤즈업 / 루즈한 테이블일 때 */
+    if (diff.useSolver && H.preflop && H.preflop.available() && shouldUseSolver(ctx)) {
       const sd = solverPreflop(ctx);
       if (sd) return sd;
     }
@@ -791,6 +824,8 @@
 
   H.ai = {
     PROFILES: PROFILES,
+    shouldUseSolver: shouldUseSolver,
+    opponentsVpip: opponentsVpip,
     NAMES: NAMES,
     DIFFICULTY: DIFFICULTY,
     KEEP_FOR_RATIO: KEEP_FOR_RATIO,

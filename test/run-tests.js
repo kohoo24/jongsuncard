@@ -748,7 +748,7 @@ test('솔버 결정 모드(TUNE.solver)에서 AI 가 표로 프리플랍을 친�
     eq(H.ai.decide(g, p, { difficulty: 'hard' }).type, 'fold');
   } finally { H.ai.TUNE.solver = prev; }
 });
-test('기본값에서는 솔버가 결정에 쓰이지 않는다 (벤치마크 결과)', function () {
+test('기본값: 6인 이상은 상대가 루즈하다고 확인되기 전까지 휴리스틱', function () {
   eq(H.ai.TUNE.solver, false);
   const g = makeGame(6);
   g.startHand();
@@ -756,6 +756,48 @@ test('기본값에서는 솔버가 결정에 쓰이지 않는다 (벤치마크 �
   forceCards(p, 'As Ad');
   const d = H.ai.decide(g, p, { difficulty: 'hard' });
   eq(d.type, 'raise'); assert(!d.think.solver, '휴리스틱 경로');
+});
+test('헤즈업은 솔버 표를 쓴다 — BB 가 오픈에 자주 접지 않고 BTN 이 3벳에 이어간다', function () {
+  const cnt = { bbFold: 0, bbN: 0, btnFold: 0, btnN: 0 };
+  for (let s = 1; s <= 60; s++) {
+    const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(s) });
+    g.addPlayer({ id: 0, name: 'A', chips: 2000, profile: H.ai.PROFILES[1] });
+    g.addPlayer({ id: 1, name: 'B', chips: 2000, profile: H.ai.PROFILES[1] });
+    g.startHand();
+    const btn = g.currentActor();
+    eq(g.position(btn), 'BTN');
+    g.act(btn.id, { type: 'raise', amount: 50 });
+    const bb = g.currentActor();
+    const d = H.ai.decide(g, bb, { difficulty: 'hard', rng: H.rng.create(s + 100) });
+    assert(d.think.solver, '헤즈업 BB 는 솔버 경로');
+    cnt.bbN++; if (d.type === 'fold') cnt.bbFold++;
+    g.act(bb.id, { type: 'raise', amount: 175 });
+    const d2 = H.ai.decide(g, btn, { difficulty: 'hard', rng: H.rng.create(s + 200) });
+    cnt.btnN++; if (d2.type === 'fold') cnt.btnFold++;
+  }
+  assert(cnt.bbFold / cnt.bbN < 0.5, 'BB 오픈 폴드 ' + cnt.bbFold + '/' + cnt.bbN + ' (예전 70%)');
+  assert(cnt.btnFold / cnt.btnN < 0.75, 'BTN 3벳 폴드 ' + cnt.btnFold + '/' + cnt.btnN + ' (예전 92~100%)');
+});
+test('고급은 상대 평균 VPIP 가 높다고 확인되면 솔버로 전환한다', function () {
+  const g = makeGame(4);
+  const tracker = H.stats.create({ bigBlind: 20 });
+  g.startHand();
+  const ctx = { game: g, player: g.currentActor(), tracker: tracker, diff: H.ai.DIFFICULTY.hard, n: 4 };
+  eq(H.ai.opponentsVpip(ctx), null, '표본이 없으면 null');
+  eq(H.ai.shouldUseSolver(ctx), false);
+  /* 상대 셋이 40핸드씩 루즈하게 친 것처럼 통계를 만든다 */
+  g.players.forEach(function (p, i) {
+    if (p === ctx.player) return;
+    const d = tracker.ensure(p.id, p.name);
+    d.hands = 40; d.vpip = i % 2 === 0 ? 20 : 16;   // 50% / 40%
+  });
+  assert(H.ai.opponentsVpip(ctx) > 0.4);
+  eq(H.ai.shouldUseSolver(ctx), true);
+  g.players.forEach(function (p) { if (p !== ctx.player) tracker.data[p.id].vpip = 6; });   // 15%
+  eq(H.ai.shouldUseSolver(ctx), false, '타이트한 테이블은 휴리스틱');
+  const ctxNormal = Object.assign({}, ctx, { diff: H.ai.DIFFICULTY.normal });
+  g.players.forEach(function (p) { if (p !== ctx.player) tracker.data[p.id].vpip = 20; });
+  eq(H.ai.shouldUseSolver(ctxNormal), false, '보통 난이도는 프로파일링이 없어 전환하지 않는다');
 });
 test('C벳 빈도를 센다', function () {
   const g = makeGame(3);
