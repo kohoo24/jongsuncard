@@ -79,6 +79,7 @@
     huSolver: true,          // 헤즈업(2인)은 솔버 표
     adaptiveSolver: true,    // 고급: 상대 평균 VPIP 가 adaptiveVpip 이상이면 솔버 (표본 adaptiveHands 이상)
     adaptiveVpip: 0.28,
+    adaptiveVpipPerPlayer: 0.018,
     adaptiveHands: 30,
     cbetAware: false,        // 어그레서의 플랍 첫 벳을 넓게 본다 — 단독 +9.0 → +4.5, 효과 없음
     /* 벳 레인지 양극화: 벳은 밸류 + 공기(블러프)이고 중간 핸드는 체크한다. 진단: TAG 의 헤즈업
@@ -387,12 +388,17 @@
   }
 
   /* 이 자리에서 솔버 프리플랍을 쓸지 */
+  /* 루즈 판정 기준 VPIP. 인원이 많을수록 자연 VPIP 가 낮아지므로 4인 기준에서 한 명당 낮춘다. */
+  function adaptiveThreshold(n) {
+    return Math.max(0.15, TUNE.adaptiveVpip - (n - 4) * TUNE.adaptiveVpipPerPlayer);
+  }
+
   function shouldUseSolver(ctx) {
     if (TUNE.solver) return true;
     if (TUNE.huSolver && ctx.n === 2) return true;
     if (TUNE.adaptiveSolver && ctx.diff.useProfiling && ctx.tracker) {
       const v = opponentsVpip(ctx);
-      if (v != null && v >= TUNE.adaptiveVpip) return true;
+      if (v != null && v >= adaptiveThreshold(ctx.n)) return true;
     }
     return false;
   }
@@ -838,6 +844,7 @@
   H.ai = {
     PROFILES: PROFILES,
     shouldUseSolver: shouldUseSolver,
+    adaptiveThreshold: adaptiveThreshold,
     opponentsVpip: opponentsVpip,
     NAMES: NAMES,
     DIFFICULTY: DIFFICULTY,

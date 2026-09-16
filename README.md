@@ -307,12 +307,12 @@ Web Worker 안에서 그대로 재생성됩니다. 그래서 `file://` 에서도
 ## 테스트
 
 ```bash
-npm test           # 단위 테스트 144개 (약 30초, 의존성 없음)
+npm test           # 단위 테스트 148개 (약 30초, 의존성 없음)
 npm run bench      # AI 강도 벤치마크 (TAG 봇 상대 4인, 6시드 × 1000핸드, 약 70초)
 npm run bench:9    # 같은 벤치마크 9인 풀링 (6시드 × 500핸드, 약 50초)
 npm run solve      # 프리플랍 솔버 테이블 재생성 (약 1분)
 npm run lint       # ESLint
-npm run test:e2e   # 브라우저 E2E 106개 (Playwright 필요)
+npm run test:e2e   # 브라우저 E2E 127개 (Playwright 필요)
 npm run test:sw    # 서비스 워커 갱신 7개 (Playwright 필요)
 ```
 

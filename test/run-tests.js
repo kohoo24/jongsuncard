@@ -799,6 +799,13 @@ test('고급은 상대 평균 VPIP 가 높다고 확인되면 솔버로 전환�
   g.players.forEach(function (p) { if (p !== ctx.player) tracker.data[p.id].vpip = 20; });
   eq(H.ai.shouldUseSolver(ctxNormal), false, '보통 난이도는 프로파일링이 없어 전환하지 않는다');
 });
+test('루즈 판정 기준은 인원이 많을수록 낮아진다 (9인 LAG 23% 도 잡는다)', function () {
+  const t4 = H.ai.adaptiveThreshold(4), t9 = H.ai.adaptiveThreshold(9);
+  assert(t4 > 0.20 && t4 < 0.33, '4인 기준 ' + t4 + ' — TAG 20% 는 아래, LAG 33% 는 위');
+  assert(t9 > 0.14 && t9 < 0.22, '9인 기준 ' + t9 + ' — TAG 14% 는 아래, LAG 23%·밸런스드 22% 는 위');
+  assert(t9 < t4);
+  assert(H.ai.adaptiveThreshold(30) >= 0.15, '하한이 있다');
+});
 test('C벳 빈도를 센다', function () {
   const g = makeGame(3);
   const tracker = H.stats.create({ bigBlind: 20 });
