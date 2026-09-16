@@ -733,6 +733,15 @@ test('손익이 제로섬이고 실제 스택 변화와 맞는다', function () 
   eq(sum, 0, '손익 합계가 0 이 아니다');
   assert(anyWinner, '이긴 사람이 하나도 없다');
 });
+test('이름 풀이 넉넉하고 겹치지 않는다', function () {
+  /* 이름이 적으면 판마다 섞어도 같은 얼굴이 돌아와, 이름과 성향이 묶인 것처럼 보인다 */
+  const names = H.ai.NAMES;
+  assert(names.length >= 30, '이름이 너무 적다: ' + names.length);
+  eq(names.length, new Set(names).size, '이름 풀에 중복이 있다');
+  assert(names.length > H.ai.PROFILES.length * 6,
+    '이름 수가 성향 수에 비해 적어 짝이 고정처럼 보인다');
+});
+
 test('all() 이 숫자 id 를 그대로 돌려준다 (좌석 색 매칭)', function () {
   /*
    * Object.keys 는 키를 문자열로 바꾼다. all() 이 그걸 쓰면 통계표의

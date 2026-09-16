@@ -131,6 +131,28 @@ async function playHands(page, target, opts) {
   });
   check('가로 스크롤이 생기지 않는다', noScroll);
 
+  /* 봇의 성향이 좌석에 적혀 있으면 패가 아니라 라벨을 보고 플레이하게 된다 */
+  const labels = await page.evaluate(function () {
+    const S = window.HoldemUI;
+    const keys = window.Holdem.ai.PROFILES.map(function (x) { return x.name; });
+    const out = [];
+    S.game.players.forEach(function (p) {
+      const e = S.seatEls[p.id];
+      if (!e) return;
+      const txt = e.name.textContent;
+      out.push({ human: !!p.isHuman, txt: txt,
+        leaks: keys.some(function (k) { return txt.indexOf(k) >= 0; }) });
+    });
+    return out;
+  });
+  const bots = labels.filter(function (x) { return !x.human; });
+  check('좌석에 봇 성향이 드러나지 않는다',
+    bots.length > 0 && bots.every(function (x) { return !x.leaks; }),
+    JSON.stringify(bots.map(function (x) { return x.txt; })));
+  check('봇 이름이 서로 겹치지 않는다',
+    new Set(bots.map(function (x) { return x.txt; })).size === bots.length,
+    JSON.stringify(bots.map(function (x) { return x.txt; })));
+
   console.log('\n[패널]');
   await safeClick(page, '.tab[data-tab="stats"]');
   await page.waitForTimeout(400);

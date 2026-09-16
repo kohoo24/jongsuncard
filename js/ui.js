@@ -420,8 +420,12 @@
     g.players.forEach(function (p) {
       const e = state.seatEls[p.id];
       if (!e) return;
-      const tag = p.isHuman ? T('table.youPlayer') : (p.profile ? p.profile.name : 'AI');
-      e.name.innerHTML = esc(p.name) + ' <span class="tag">' + esc(tag) + '</span>';
+      /*
+       * 봇의 성향은 이름 옆에 쓰지 않는다. 라벨이 보이면 패가 아니라 라벨을 보고
+       * 플레이하게 된다 — 상대가 어떤 사람인지는 액션으로 읽어야 한다.
+       */
+      e.name.innerHTML = esc(p.name) +
+        (p.isHuman ? ' <span class="tag">' + esc(T('table.youPlayer')) + '</span>' : '');
       e.chips.textContent = num(p.chips);
 
       if (p.allIn && !p.folded) e.last.innerHTML = '<span class="allin">' + T('table.allIn') + '</span>';
