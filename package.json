@@ -8,6 +8,7 @@
     "test:e2e": "node test/e2e.js",
     "test:sw": "node test/sw.js",
     "bench": "node test/bench.js",
+    "bench:9": "node test/bench.js normal,hard 6 500 9",
     "lint": "eslint js sw.js test",
     "start": "python3 -m http.server 8000"
   },

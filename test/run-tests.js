@@ -940,6 +940,14 @@ test('normal 이 TAG 에게 크게 지지 않는다 (800핸드, 안전망)', fun
   console.log('      (normal ' + (tagBench.normal >= 0 ? '+' : '') + tagBench.normal.toFixed(0) + 'bb/100 vs TAG)');
   assert(tagBench.normal > -90, 'normal 이 TAG 에게 너무 진다 (실제 ' + tagBench.normal.toFixed(0) + 'bb/100)');
 });
+test('9인 테이블에서도 hard 가 TAG 에게 크게 지지 않는다 (400핸드, 안전망)', function () {
+  const r = TAG.benchmark({ difficulty: 'hard', hands: 400, seed: 4242, players: 9 });
+  eq(r.players, 9);
+  console.log('      (hard 9인 ' + (r.bb100 >= 0 ? '+' : '') + r.bb100.toFixed(0) + 'bb/100 vs TAG — 정밀 비교는 npm run bench:9)');
+  assert(r.bb100 > -80, 'hard 가 9인 TAG 에게 너무 진다 (실제 ' + r.bb100.toFixed(0) + 'bb/100)');
+  const tags = r.tracker.all().filter(function (x) { return x.name.indexOf('tag') === 0; });
+  tags.forEach(function (t) { assert(t.vpip > 0.08 && t.vpip < 0.28, '9인 TAG VPIP 범위 밖: ' + (t.vpip * 100).toFixed(0) + '%'); });
+});
 test('easy 는 TAG 에게 확실히 진다 (300핸드)', function () {
   tagBench.easy = TAG.benchmark({ difficulty: 'easy', hands: 300, seed: 4242 }).bb100;
   console.log('      (easy ' + tagBench.easy.toFixed(0) + 'bb/100 vs TAG)');

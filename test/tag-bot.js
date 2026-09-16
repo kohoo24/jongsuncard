@@ -18,8 +18,9 @@ require('../js/ranges.js');
 
 const R = H.ranges, E = H.equity;
 
-const OPEN = { UTG: 0.12, MP: 0.15, CO: 0.22, BTN: 0.32, SB: 0.28, BB: 0.30 };
-const CALL_OPEN = { UTG: 0.10, MP: 0.10, CO: 0.12, BTN: 0.14, SB: 0.09, BB: 0.20 };
+/* 풀링(7~9인) 포지션 포함. 앞자리일수록 타이트 */
+const OPEN = { UTG: 0.12, UTG1: 0.13, MP: 0.15, LJ: 0.17, HJ: 0.19, CO: 0.22, BTN: 0.32, SB: 0.28, BB: 0.30 };
+const CALL_OPEN = { UTG: 0.10, UTG1: 0.10, MP: 0.10, LJ: 0.11, HJ: 0.11, CO: 0.12, BTN: 0.14, SB: 0.09, BB: 0.20 };
 
 function preflop(g, p, a, pos) {
   const pct = R.percentile(R.classOf(p.cards[0], p.cards[1]));
@@ -109,14 +110,18 @@ function decide(g, p) {
 }
 
 /**
- * AI 두 명 대 TAG 두 명을 번갈아 앉혀(포지션 편향 제거) 스택을 매 핸드 100bb 로
- * 되돌리며 hands 핸드를 돌린다. AI 쪽의 bb/100 을 돌려준다.
+ * AI 와 TAG 를 번갈아 앉혀(포지션 편향 제거) 스택을 매 핸드 100bb 로 되돌리며
+ * hands 핸드를 돌린다. AI 쪽의 한 자리당 bb/100 을 돌려준다.
+ * players 기본 4 (AI 2 · TAG 2). 9 이면 AI 5 · TAG 4 — 버튼이 돌아가므로 공평하다.
  */
 function benchmark(opts) {
   const BB = 20, START = BB * 100;
   const difficulty = opts.difficulty, hands = opts.hands;
+  const players = opts.players || 4;
   const g = new H.Game({ smallBlind: BB / 2, bigBlind: BB, rng: H.rng.create(opts.seed || 4242) });
-  const kinds = ['ai', 'tag', 'ai', 'tag'];
+  const kinds = [];
+  for (let i = 0; i < players; i++) kinds.push(i % 2 === 0 ? 'ai' : 'tag');
+  const nAi = kinds.filter(function (k) { return k === 'ai'; }).length;
   kinds.forEach(function (k, i) {
     g.addPlayer({ id: i, name: k + i, chips: START, profile: H.ai.PROFILES[1] });
   });
@@ -141,7 +146,7 @@ function benchmark(opts) {
     tracker.endHand(g);
     g.players.forEach(function (p) { if (kinds[p.id] === 'ai') aiNet += p.chips - START; });
   }
-  return { bb100: aiNet / BB / (hands * 2) * 100, tracker: tracker };
+  return { bb100: aiNet / BB / (hands * nAi) * 100, tracker: tracker, players: players };
 }
 
 module.exports = { decide: decide, benchmark: benchmark };
