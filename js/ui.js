@@ -12,7 +12,10 @@
     3: [[50, 86], [14, 34], [86, 34]],
     4: [[50, 86], [11, 52], [50, 16], [89, 52]],
     5: [[50, 86], [10, 56], [25, 18], [75, 18], [90, 56]],
-    6: [[50, 86], [10, 58], [18, 22], [50, 15], [82, 22], [90, 58]]
+    6: [[50, 86], [10, 58], [18, 22], [50, 15], [82, 22], [90, 58]],
+    7: [[50, 86], [10, 60], [13, 27], [36, 14], [64, 14], [87, 27], [90, 60]],
+    8: [[50, 86], [9, 62], [11, 32], [30, 15], [50, 12], [70, 15], [89, 32], [91, 62]],
+    9: [[50, 86], [10, 66], [8, 40], [20, 18], [40, 12], [60, 12], [80, 18], [92, 40], [90, 66]]
   };
   /* 좁은 화면에서는 측면 좌석의 카드가 커뮤니티 카드와 겹치므로 위아래로 더 벌린다 */
   const SEAT_POS_NARROW = {
@@ -20,7 +23,10 @@
     3: [[50, 88], [16, 26], [84, 26]],
     4: [[50, 88], [15, 62], [50, 13], [85, 62]],
     5: [[50, 88], [14, 64], [24, 14], [76, 14], [86, 64]],
-    6: [[50, 88], [13, 66], [17, 20], [50, 11], [83, 20], [87, 66]]
+    6: [[50, 88], [13, 66], [17, 20], [50, 11], [83, 20], [87, 66]],
+    7: [[50, 88], [12, 66], [14, 30], [35, 12], [65, 12], [86, 30], [88, 66]],
+    8: [[50, 88], [11, 68], [12, 38], [28, 14], [50, 10], [72, 14], [88, 38], [89, 68]],
+    9: [[50, 88], [11, 70], [9, 44], [19, 19], [39, 10], [61, 10], [81, 19], [91, 44], [89, 70]]
   };
 
   const AVATARS = ['🦅', '🦊', '🐺', '🐱', '🐸', '🦉', '🐻', '🦌'];
@@ -138,7 +144,7 @@
     const n = g.players.length;
     const narrow = global.innerWidth < 720;
     const table = narrow ? SEAT_POS_NARROW : SEAT_POS;
-    const pos = table[n] || table[6];
+    const pos = table[n] || table[9];
     const heroIdx = g.players.findIndex(function (p) { return p.isHuman; });
     const order = [];
     for (let i = 0; i < n; i++) order.push(g.players[(heroIdx + i + n) % n]);
@@ -211,7 +217,16 @@
     3: ['T30', 'T70'],
     4: ['T18', 'T50', 'T82'],
     5: ['B15', 'T28', 'T72', 'B85'],
-    6: ['B15', 'T16', 'T50', 'T84', 'B85']
+    6: ['B15', 'T16', 'T50', 'T84', 'B85'],
+    7: ['B15', 'U18', 'T30', 'T70', 'U82', 'B85'],
+    8: ['B15', 'U16', 'T16', 'T50', 'T84', 'U84', 'B85'],
+    9: ['B15', 'U15', 'T16', 'T50', 'U50', 'T84', 'U85', 'B85']
+  };
+  /* 가로(폭은 넉넉, 높이는 200px 남짓): 둘째 행(U)은 보드 양옆, 상단 행은 최대 4석 */
+  const SHORT_SLOTS_LAND = {
+    7: ['B15', 'U7', 'T30', 'T70', 'U93', 'B85'],
+    8: ['B15', 'U7', 'T20', 'T50', 'T80', 'U93', 'B85'],
+    9: ['B15', 'U7', 'T15', 'T38', 'T62', 'T85', 'U93', 'B85']
   };
   /* 좁은 화면은 퍼센트 표가 520px 까지도 팟과 부딪히므로 계산 배치를 더 넓게 쓴다 */
   function shortMaxH() { return global.innerWidth < 720 ? 520 : 430; }
@@ -222,10 +237,15 @@
     const felt = $('felt');
     const fh = felt.clientHeight, fw = felt.clientWidth;
     if (!fh || !fw) return;
-    const short = fh < shortMaxH();
+    const n = g.players.length;
+    const narrowScreen = global.innerWidth < 720;
+    /* 좁은 화면의 7인 이상은 퍼센트 표로는 좌석끼리 겹친다 — 항상 계산 배치 */
+    const short = fh < shortMaxH() || (narrowScreen && n >= 7);
     const land = short && global.innerWidth > global.innerHeight;
+    const dense = short && !land && n >= 7;   // 세로 7인 이상: 마지막 액션 줄 숨김 · 작은 카드
     felt.classList.toggle('short', short);
     felt.classList.toggle('land', land);
+    felt.classList.toggle('dense', dense);
     const center = felt.querySelector('.table-center');
     const heroEl = state.seatEls[state.seatOrder[0].id];
 
@@ -263,12 +283,15 @@
     const badge = 38;                                  // 베팅 배지가 차지하는 높이 (여백 포함)
     const margin = 6;
     const potH = 31;
-    const n = g.players.length;
-    const slots = SHORT_SLOTS[n] || SHORT_SLOTS[6];
+    const slots = (land && SHORT_SLOTS_LAND[n]) || SHORT_SLOTS[n] || SHORT_SLOTS[9];
     const topCy = margin + botBlock / 2;
-    /* 보드: 상단 좌석(과 배지) 아래부터. 가로에서는 배지가 옆에 붙어 여백이 작다 */
-    const boardTop = topCy + botBlock / 2 + (land ? 6 : badge);
+    const hasRow2 = !land && slots.some(function (s) { return s[0] === 'U'; });
+    const row2Cy = topCy + botBlock + 4;
+    const lowestTop = hasRow2 ? row2Cy : topCy;
+    /* 보드: 가장 낮은 상단 행(과 배지) 아래부터. 가로에서는 배지가 옆에 붙어 여백이 작다 */
+    const boardTop = lowestTop + botBlock / 2 + (land ? 6 : badge);
     const boardBottom = boardTop + (land ? cardH : potH + cardH + 4);   // 낮은 펠트에선 스트리트 라벨을 숨긴다
+    const boardMidY = boardTop + (land ? cardH / 2 : potH + 5 + cardH / 2);
     /* 히어로: 카드가 보드에 닿을 만큼 낮으면 카드를 플레이트 옆으로 (가로는 항상) */
     const hcompact = land || (fh - margin - heroTall < boardBottom + 4);
     felt.classList.toggle('hcompact', hcompact);
@@ -276,7 +299,8 @@
     const heroCy = fh - margin - heroH / 2;
     /* 양옆 좌석: 보통은 히어로와 같은 행. 히어로가 압축되면 폭이 넓어져 부딪히므로
        히어로 행 바로 위(보드와 히어로 사이에 생긴 여유)로 올린다. 가로는 폭이 넉넉하다. */
-    const sideCy = (hcompact && !land) ? heroCy - heroH / 2 - botBlock / 2 - 2 : heroCy - (hcompact ? 0 : 12);
+    let sideCy = (hcompact && !land) ? heroCy - heroH / 2 - botBlock / 2 - 2 : heroCy - (hcompact ? 0 : 12);
+    if (hcompact && !land) sideCy = Math.max(sideCy, boardBottom + botBlock / 2 + 2);   // 보드 아래로
     center.style.top = boardTop + 'px';
 
     state.seatOrder.forEach(function (p, i) {
@@ -287,7 +311,9 @@
       else {
         const s = slots[i - 1] || 'T50';
         x = parseInt(s.slice(1), 10);
-        if (s[0] === 'T') { cy = topCy; top = true; } else { cy = sideCy; top = false; }
+        if (s[0] === 'T') { cy = topCy; top = true; }
+        else if (s[0] === 'U') { cy = land ? boardMidY : row2Cy; top = true; }
+        else { cy = sideCy; top = false; }
       }
       e.root.style.left = x + '%';
       e.root.style.top = cy + 'px';
@@ -1291,7 +1317,12 @@
     const d = state.drill;
     if (!d) return;
     let r = null;
-    try { r = H.drill.generate({ target: d.target, tracker: d.tracker, heroName: T('common.you') }); }
+    try {
+      r = H.drill.generate({
+        target: d.target, tracker: d.tracker, heroName: T('common.you'),
+        players: Math.max(2, Math.min(9, (state.settings.bots || 5) + 1))
+      });
+    }
     catch (e) { r = null; }
     if (!r) { quitDrill(); return; }
     d.current = r;
@@ -1499,7 +1530,7 @@
   function buildSetup() {
     const s = state.settings;
     const bots = [];
-    for (let i = 1; i <= 5; i++) {
+    for (let i = 1; i <= 8; i++) {
       bots.push({ value: i, label: i === 1 ? T('setup.headsUp') : T('setup.opponentsN', { n: i }) });
     }
     fillSelect('optBots', bots, s.bots);

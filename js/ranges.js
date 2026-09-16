@@ -218,8 +218,16 @@
     return info ? info.pct : 1;
   }
 
-  /* 포지션별 레이즈 퍼스트 인 레인지 (6맥스 기준, 인원수로 보정) */
-  const OPEN_PCT = { UTG: 0.14, MP: 0.18, CO: 0.26, BTN: 0.44, SB: 0.36, BB: 0.44 };
+  /*
+   * 포지션별 레이즈 퍼스트 인 레인지 (6맥스 기준, 인원수로 보정).
+   * 7인 이상은 UTG+1 · LJ(로잭) · HJ(하이잭)이 추가되고 전체가 12% 좁아진다 —
+   * 9인 UTG 는 약 12%, 버튼은 39%.
+   */
+  const OPEN_PCT = {
+    UTG: 0.14, UTG1: 0.16, MP: 0.18, LJ: 0.20, HJ: 0.23, CO: 0.26, BTN: 0.44, SB: 0.36, BB: 0.44
+  };
+  /* 표 순서 (차트·프로파일이 같은 순서를 쓴다) */
+  const POSITION_ORDER = ['UTG', 'UTG1', 'MP', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'];
 
   function openPercent(pos, playerCount) {
     let base = OPEN_PCT[pos] != null ? OPEN_PCT[pos] : 0.22;
@@ -231,7 +239,13 @@
     return Math.min(0.92, base);
   }
 
-  /* 포지션 판별: 0=버튼 기준 상대 좌석 */
+  /*
+   * 포지션 판별: 0=버튼 기준 상대 좌석.
+   *   6인 이하  BTN SB BB UTG MP CO
+   *   7인       BTN SB BB UTG MP HJ CO
+   *   8인       BTN SB BB UTG UTG1 LJ HJ CO
+   *   9인       BTN SB BB UTG UTG1 MP LJ HJ CO
+   */
   function positionOf(seatIndex, button, playerCount) {
     const n = playerCount;
     const rel = ((seatIndex - button) % n + n) % n;
@@ -240,8 +254,18 @@
     if (rel === 1) return 'SB';
     if (rel === 2) return 'BB';
     if (rel === n - 1) return 'CO';
+    if (n >= 7 && rel === n - 2) return 'HJ';
+    if (n >= 8 && rel === n - 3) return 'LJ';
     if (rel === 3) return 'UTG';
+    if (n >= 8 && rel === 4) return 'UTG1';
     return 'MP';
+  }
+
+  /* n 인 테이블에 등장하는 포지션들 (버튼 기준 순서) */
+  function positionsFor(n) {
+    const out = [];
+    for (let rel = 0; rel < n; rel++) out.push(positionOf(rel, 0, n));
+    return out;
   }
 
   /* 밴드 연산 */
@@ -424,6 +448,8 @@
     RANKED: RANKED,
     INFO: INFO,
     OPEN_PCT: OPEN_PCT,
+    POSITION_ORDER: POSITION_ORDER,
+    positionsFor: positionsFor,
     ACTION_BANDS: ACTION_BANDS,
     classOf: classOf,
     classOfCodes: classOfCodes,

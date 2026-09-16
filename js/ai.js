@@ -83,7 +83,7 @@
   /* 숏스택 푸시 레인지 */
   function pushRange(bbLeft, pos, n) {
     const base = Math.max(0.08, Math.min(0.90, 0.85 - bbLeft * 0.055));
-    const posMult = { BTN: 1.5, CO: 1.25, SB: 1.35, BB: 1.0, MP: 0.85, UTG: 0.7 }[pos] || 1;
+    const posMult = { BTN: 1.5, CO: 1.25, HJ: 1.1, LJ: 0.95, SB: 1.35, BB: 1.0, MP: 0.85, UTG1: 0.78, UTG: 0.7 }[pos] || 1;
     let m = posMult;
     if (n <= 3) m *= 1.4; else if (n <= 4) m *= 1.2;
     return Math.min(0.95, base * m);
@@ -95,9 +95,9 @@
    *  VPIP 가 60% 까지 치솟는다. 콜 기준은 따로 둔다.)
    */
   const CALL_CAP = {
-    vsOpen:   { BB: 0.33, SB: 0.11, BTN: 0.17, CO: 0.15, MP: 0.13, UTG: 0.12 },
-    vsThree:  { BB: 0.060, SB: 0.045, BTN: 0.065, CO: 0.060, MP: 0.050, UTG: 0.045 },
-    vsFour:   { BB: 0.022, SB: 0.020, BTN: 0.024, CO: 0.022, MP: 0.020, UTG: 0.018 }
+    vsOpen:   { BB: 0.33, SB: 0.11, BTN: 0.17, CO: 0.15, HJ: 0.14, LJ: 0.135, MP: 0.13, UTG1: 0.125, UTG: 0.12 },
+    vsThree:  { BB: 0.060, SB: 0.045, BTN: 0.065, CO: 0.060, HJ: 0.055, LJ: 0.052, MP: 0.050, UTG1: 0.048, UTG: 0.045 },
+    vsFour:   { BB: 0.022, SB: 0.020, BTN: 0.024, CO: 0.022, HJ: 0.021, LJ: 0.020, MP: 0.020, UTG1: 0.019, UTG: 0.018 }
   };
 
   function callCapFor(raises, pos) {
@@ -107,7 +107,7 @@
 
   /* 이 인원수에서 기대되는 평균 VPIP (프로파일링 보정의 기준선) */
   function expectedVpip(n) {
-    const positions = n === 2 ? ['BTN', 'BB'] : ['BTN', 'SB', 'BB', 'UTG', 'MP', 'CO'].slice(0, n);
+    const positions = R.positionsFor(n);
     let sum = 0;
     for (let i = 0; i < positions.length; i++) sum += R.openPercent(positions[i], n);
     return Math.max(0.12, Math.min(0.6, (sum / positions.length) * 1.15));

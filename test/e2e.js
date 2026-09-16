@@ -243,12 +243,13 @@ async function playHands(page, target, opts) {
     return {
       cells: document.querySelectorAll('.range-cell').length,
       inRange: document.querySelectorAll('.range-cell.in').length,
-      buttons: document.querySelectorAll('.pos-btn').length
+      buttons: document.querySelectorAll('.pos-btn').length,
+      expectButtons: window.Holdem.ranges.positionsFor(window.HoldemUI.game.players.length).length
     };
   });
   check('프리플랍 차트가 13x13 이다', chart.cells === 169, '칸 ' + chart.cells);
   check('레인지에 포함된 칸이 표시된다', chart.inRange > 10 && chart.inRange < 169, '포함 ' + chart.inRange);
-  check('포지션 버튼 6개', chart.buttons === 6);
+  check('포지션 버튼이 테이블 인원의 포지션 수와 같다', chart.buttons === chart.expectButtons, chart.buttons + ' / ' + chart.expectButtons);
 
   async function rangeSizeAt(index) {
     await safeClick(page, '.pos-btn:nth-child(' + index + ')');
@@ -629,7 +630,56 @@ async function playHands(page, target, opts) {
     });
     return bad;
   }
-  for (const bots of [5, 3, 1]) {
+  console.log('\n[9인 테이블]');
+  {
+    const p9 = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    const e9 = [];
+    collectErrors(p9, e9);
+    await p9.goto(URL);
+    await p9.waitForSelector('#setupModal.show');
+    const optMax = await p9.$$eval('#optBots option', function (os) { return Math.max.apply(null, os.map(function (o) { return parseInt(o.value, 10); })); });
+    check('상대를 8명까지 고를 수 있다', optMax === 8, String(optMax));
+    await p9.selectOption('#optBots', '8');
+    await p9.selectOption('#optSpeed', '350');
+    await p9.uncheck('#optReview');
+    await p9.fill('#optSeed', 'NINE1');
+    await p9.click('#btnStart');
+    await p9.waitForTimeout(700);
+    const st9 = await p9.evaluate(function () {
+      const g = window.HoldemUI.game;
+      return {
+        players: g.players.length, seats: document.querySelectorAll('.seat').length,
+        positions: g.players.map(function (p) { return g.position(p); }).sort().join(' ')
+      };
+    });
+    check('9인 게임이 시작되고 좌석 9개가 그려진다', st9.players === 9 && st9.seats === 9, JSON.stringify(st9));
+    check('포지션에 UTG+1 · LJ · HJ 가 있다', /UTG1/.test(st9.positions) && /LJ/.test(st9.positions) && /HJ/.test(st9.positions), st9.positions);
+    const bad9 = await p9.evaluate(measureOverlaps);
+    check('데스크톱 9인: 좌석끼리·팟·보드와 겹치지 않는다', bad9.length === 0, bad9.join(' | '));
+    /* 몇 핸드 돌려 본다 */
+    const until9 = Date.now() + 25000;
+    let hands9 = 0;
+    while (hands9 < 3 && Date.now() < until9) {
+      const st = await p9.evaluate(function () {
+        const g = window.HoldemUI.game;
+        return { phase: g.phase, hero: !!(g.currentActor() && g.currentActor().isHuman), over: document.getElementById('overModal').classList.contains('show') };
+      });
+      if (st.over) break;
+      if (st.phase === 'show-choice') await p9.click('#btnMuck');
+      else if (st.phase === 'awaiting-action' && st.hero) await p9.click('#btnFold');
+      else if (st.phase === 'hand-over') { hands9++; await p9.click('#btnNext'); }
+      await p9.waitForTimeout(100);
+    }
+    check('9인 게임이 진행된다', hands9 >= 2, '진행 ' + hands9);
+    await safeClick(p9, '.tab[data-tab="chart"]');
+    await p9.waitForTimeout(200);
+    const btn9 = await p9.$$eval('.pos-btn', function (bs) { return bs.map(function (b) { return b.textContent; }).length; });
+    check('9인 차트에 포지션 버튼 9개', btn9 === 9, String(btn9));
+    check('9인: 콘솔 에러 없음', e9.length === 0, e9.slice(0, 2).join(' | '));
+    await p9.close();
+  }
+
+  for (const bots of [8, 5, 3, 1]) {
     const mp = await browser.newPage({ viewport: { width: 390, height: 664 }, isMobile: true, hasTouch: true });
     const mErr = [];
     collectErrors(mp, mErr);

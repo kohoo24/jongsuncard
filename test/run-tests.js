@@ -12,6 +12,8 @@ require('../js/review.js');
 require('../js/history.js');
 require('../js/i18n.js');
 require('../js/format.js');
+require('../js/profile.js');
+require('../js/drill.js');
 const C = H.cards;
 
 let passed = 0, failed = 0;
@@ -537,6 +539,74 @@ test('13x13 차트 격자', function () {
   const g = RG.chartGrid();
   eq(g.length, 13); eq(g[0].length, 13);
   eq(g[0][0], 'AA'); eq(g[0][1], 'AKs'); eq(g[1][0], 'AKo'); eq(g[12][12], '22');
+});
+
+console.log('\n[풀링 포지션 (7~9인)]');
+test('인원별 포지션 순서', function () {
+  eq(RG.positionsFor(6).join(' '), 'BTN SB BB UTG MP CO');
+  eq(RG.positionsFor(7).join(' '), 'BTN SB BB UTG MP HJ CO');
+  eq(RG.positionsFor(8).join(' '), 'BTN SB BB UTG UTG1 LJ HJ CO');
+  eq(RG.positionsFor(9).join(' '), 'BTN SB BB UTG UTG1 MP LJ HJ CO');
+  eq(RG.positionsFor(2).join(' '), 'BTN BB');
+  eq(RG.positionsFor(4).join(' '), 'BTN SB BB CO');
+});
+test('9인 오픈 레인지는 앞자리일수록 좁고 6인보다 타이트하다', function () {
+  const order = ['UTG', 'UTG1', 'MP', 'LJ', 'HJ', 'CO', 'BTN'];
+  for (let i = 1; i < order.length; i++) {
+    assert(RG.openPercent(order[i], 9) > RG.openPercent(order[i - 1], 9), order[i - 1] + ' < ' + order[i]);
+  }
+  assert(RG.openPercent('UTG', 9) < RG.openPercent('UTG', 6), '9인 UTG 가 6인 UTG 보다 좁다');
+  assert(RG.openPercent('UTG', 9) < 0.14 && RG.openPercent('UTG', 9) > 0.09, '9인 UTG 약 12% (실제 ' + RG.openPercent('UTG', 9) + ')');
+});
+test('모든 포지션에 i18n 이름이 있다', function () {
+  RG.POSITION_ORDER.forEach(function (p) { assert(H.i18n.has('pos.' + p), 'pos.' + p); });
+});
+test('9인 테이블 300핸드가 규칙 위반 없이 돌고 봇이 6인보다 타이트하다', function () {
+  function run(nPlayers, hands, seed) {
+    const BB = 20;
+    const g = new H.Game({ smallBlind: BB / 2, bigBlind: BB, rng: H.rng.create(seed) });
+    for (let i = 0; i < nPlayers; i++) g.addPlayer({ id: i, name: 'P' + i, chips: BB * 100, profile: H.ai.PROFILES[i % 5] });
+    const tracker = H.stats.create({ bigBlind: BB });
+    for (let h = 0; h < hands; h++) {
+      g.players.forEach(function (p) { p.chips = BB * 100; });
+      g.startHand();
+      tracker.startHand(g);
+      let guard = 0;
+      while (g.phase !== 'hand-over' && g.phase !== 'game-over' && guard++ < 400) {
+        if (g.phase === 'awaiting-action') {
+          const p = g.currentActor();
+          const d = H.ai.decide(g, p, { difficulty: 'hard', tracker: tracker });
+          const res = g.act(p.id, d);
+          assert(res.ok, '불가능한 액션: ' + JSON.stringify(d) + ' / ' + res.error);
+        } else if (g.phase === 'need-street') g.dealNextStreet();
+        else if (g.phase === 'showdown') g.resolveShowdown();
+      }
+      tracker.endHand(g);
+      const total = g.players.reduce(function (s, p) { return s + p.chips; }, 0);
+      eq(total, BB * 100 * nPlayers, '칩 총량 보존');
+    }
+    const all = tracker.all();
+    return all.reduce(function (s, x) { return s + x.vpip; }, 0) / all.length;
+  }
+  const v9 = run(9, 300, 909), v6 = run(6, 300, 606);
+  console.log('      (VPIP 9인 ' + (v9 * 100).toFixed(0) + '% · 6인 ' + (v6 * 100).toFixed(0) + '%)');
+  assert(v9 < v6, '9인 VPIP 가 6인보다 낮아야 한다');
+  assert(v9 > 0.10 && v9 < 0.40, '9인 VPIP 가 현실적인 범위여야 한다: ' + (v9 * 100).toFixed(0) + '%');
+});
+test('9인 드릴에서 풀링 포지션이 나온다', function () {
+  const seen = {};
+  for (let s = 1; s <= 10; s++) seen[H.drill.generate({ target: 'preflop/open', seed: s, players: 9 }).spot.pos] = true;
+  const keys = Object.keys(seen);
+  assert(keys.length >= 4, '포지션이 다양해야 한다: ' + keys.join(','));
+  assert(keys.some(function (k) { return k === 'UTG1' || k === 'LJ' || k === 'HJ'; }), '풀링 포지션이 하나는 나와야 한다: ' + keys.join(','));
+});
+test('9인에서 리뷰 항목의 포지션이 풀링 이름이다', function () {
+  const g = makeGame(9);
+  g.startHand();
+  const p = g.currentActor();
+  eq(g.position(p), 'UTG');
+  g.act(p.id, { type: 'fold' });
+  eq(g.position(g.currentActor()), 'UTG1');
 });
 
 console.log('\n[레인지 기반 승률]');

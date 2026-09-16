@@ -314,6 +314,9 @@
     'pos.BB': ['빅블라인드', 'Big blind'],
     'pos.UTG': ['언더더건', 'UTG'],
     'pos.MP': ['미들', 'Middle'],
+    'pos.UTG1': ['언더더건+1', 'UTG+1'],
+    'pos.LJ': ['로잭', 'Lojack'],
+    'pos.HJ': ['하이잭', 'Hijack'],
     'pos.CO': ['컷오프', 'Cutoff'],
 
     /* --- AI 속마음 --- */

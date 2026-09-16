@@ -358,7 +358,11 @@
   H.panels.renderChart = function (host, state) {
     host.innerHTML = '';
     const R = H.ranges;
-    const positions = ['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'];
+    /* 이 테이블 인원에 등장하는 포지션만 (6인: 6개, 9인: 9개) */
+    const positions = R.POSITION_ORDER.filter(function (p) {
+      return R.positionsFor(state.playerCount || 6).indexOf(p) >= 0;
+    });
+    if (positions.indexOf(state.position) < 0) state.position = positions[0];
     const bar = el('div', 'chart-controls');
     positions.forEach(function (pos) {
       const b = el('button', 'pos-btn' + (state.position === pos ? ' on' : ''), T('pos.' + pos));

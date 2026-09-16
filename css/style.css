@@ -869,6 +869,12 @@ kbd {
 /* 봇의 뒷면 카드는 그리지 않는다 — 폴드는 흐림으로 구분되고, 공개된 카드만 플레이트 옆에 붙는다 */
 .felt.short .seat.bot .card.back { display: none; }
 .felt.short .seat.bot .cards:empty { display: none; }
+/* 세로 7인 이상(밀집): 마지막 액션 줄을 숨기고 카드를 줄여 세 행 + 보드 + 히어로를 넣는다 */
+.felt.short.dense { --card-w: 32px; --card-h: 46px; }
+.felt.short.dense .seat.bot .last { display: none; }
+.felt.short.dense .seat.bot .plate { width: 92px; padding: 4px 6px; }
+.felt.short.dense .seat.bot .chips { font-size: 12px; }
+.felt.short.dense .seat.hero .plate { width: 112px; }
 /* 히어로 압축: 카드를 플레이트 옆에 (가로는 항상, 세로는 공간이 모자랄 때) */
 .felt.short.hcompact .seat.hero { display: flex; align-items: center; gap: 6px; width: auto; }
 .felt.short.hcompact .seat.hero .cards { min-height: 0; margin: 0; flex: none; }

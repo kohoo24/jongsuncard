@@ -13,7 +13,7 @@
 
   const STREETS = ['preflop', 'flop', 'turn', 'river'];
   const SPOTS = { preflop: ['open', 'vsOpen', 'vs3bet'], post: ['cbet', 'checkedTo', 'vsBet'] };
-  const POSITIONS = ['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'];
+  const POSITIONS = ['UTG', 'UTG1', 'MP', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'];
   const RECENT_LIMIT = 30;
   const MIN_SAMPLE = 5;       // 이보다 적으면 "약점"이라 부르지 않는다
   const WEAK_MIN_AVG = 0.15;  // 결정당 평균 손실이 이보다 작으면 약점이 아니다 (리뷰의 '좋은 판단' 경계)
