@@ -1100,6 +1100,17 @@ test('9인 테이블에서도 hard 가 TAG 에게 크게 지지 않는다 (400�
   const tags = r.tracker.all().filter(function (x) { return x.name.indexOf('tag') === 0; });
   tags.forEach(function (t) { assert(t.vpip > 0.08 && t.vpip < 0.28, '9인 TAG VPIP 범위 밖: ' + (t.vpip * 100).toFixed(0) + '%'); });
 });
+test('벤치마크 상대 5종이 규칙 위반 없이 돌고 성향 순서가 맞는다 (VPIP: 락 < TAG < LAG < 스테이션)', function () {
+  const vpip = {};
+  TAG.STYLES.forEach(function (st) {
+    const r = TAG.benchmark({ difficulty: 'normal', hands: 120, seed: 31, style: st });
+    const bots = r.tracker.all().filter(function (x) { return x.name.indexOf('tag') === 0; });
+    vpip[st] = bots.reduce(function (a, x) { return a + x.vpip; }, 0) / bots.length;
+  });
+  assert(vpip.rock < vpip.tag && vpip.tag < vpip.lag && vpip.lag < vpip.station,
+    JSON.stringify(vpip));
+  assert(vpip.balanced > vpip.tag, '밸런스드(솔버 레인지)는 TAG 보다 넓다');
+});
 test('easy 는 TAG 에게 확실히 진다 (300핸드)', function () {
   tagBench.easy = TAG.benchmark({ difficulty: 'easy', hands: 300, seed: 4242 }).bb100;
   console.log('      (easy ' + tagBench.easy.toFixed(0) + 'bb/100 vs TAG)');
