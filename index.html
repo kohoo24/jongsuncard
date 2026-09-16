@@ -45,6 +45,7 @@
         <button class="tab" data-tab="stats" role="tab" aria-selected="false" data-i18n="tab.stats">통계</button>
         <button class="tab" data-tab="hist" role="tab" aria-selected="false" data-i18n="tab.hist">히스토리</button>
         <button class="tab" data-tab="chart" role="tab" aria-selected="false" data-i18n="tab.chart">차트</button>
+        <button class="tab" data-tab="learn" role="tab" aria-selected="false" data-i18n="tab.learn">학습</button>
       </nav>
       <div class="tab-body" id="tabBody" role="tabpanel" aria-live="polite"></div>
     </aside>
@@ -55,6 +56,7 @@
     <div class="street-summary" id="streetSummary" aria-live="polite"></div>
 
     <div class="action-area">
+      <div class="drill-hint hidden" id="drillHint" aria-live="polite"></div>
       <div class="btn-row" id="btnRow">
         <button class="act danger" id="btnFold"><span></span><kbd>F</kbd></button>
         <button class="act" id="btnCall"><span></span><kbd>C</kbd></button>
@@ -81,6 +83,13 @@
       <div class="btn-row" id="addonRow">
         <button class="act gold" id="btnAddon" data-i18n="tour.addonPlain">애드온</button>
         <button class="act" id="btnAddonSkip" data-i18n="common.no">아니오</button>
+      </div>
+      <div class="drill-row hidden" id="drillRow">
+        <div class="drill-feedback hidden" id="drillFeedback" aria-live="polite"></div>
+        <div class="btn-row">
+          <button class="act ghost-btn" id="btnDrillQuit" data-i18n="drill.quit">드릴 종료</button>
+          <button class="act next hidden" id="btnDrillNext"><span data-i18n="drill.next">다음 문제</span><kbd>Space</kbd></button>
+        </div>
       </div>
       <div class="btn-row" id="nextRow">
         <button class="act ghost-btn" id="btnReview" data-i18n="review.title">핸드 리뷰</button>
@@ -130,6 +139,7 @@
 
     <button class="act gold big" id="btnStart" data-i18n="setup.start">게임 시작</button>
     <button class="act ghost-btn small" id="btnResume" hidden>이어하기</button>
+    <button class="act ghost-btn small" id="btnDrillFromSetup" data-i18n="setup.drill">약점 드릴</button>
     <p class="hint" data-i18n="setup.shortcuts"></p>
   </div>
 </div>
@@ -174,6 +184,8 @@
 <script src="js/engine.js"></script>
 <script src="js/ai.js"></script>
 <script src="js/review.js"></script>
+<script src="js/profile.js"></script>
+<script src="js/drill.js"></script>
 <script src="js/history.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/panels.js"></script>

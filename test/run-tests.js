@@ -1235,6 +1235,142 @@ test('JSON 왕복', function () {
   eq(H.history.buildReplay(restored.get(0)).length, H.history.buildReplay(r.rec.get(0)).length);
 });
 
+console.log('\n[약점 프로파일]');
+require('../js/profile.js');
+require('../js/drill.js');
+function fakeItem(street, spot, pos, lossBb) {
+  const verdict = H.review.classify(lossBb).verdict;
+  return {
+    street: street, spot: spot, position: pos, evLossBb: lossBb, verdict: verdict,
+    cards: hand('As Kd'), board: street === 'preflop' ? [] : hand('2c 7d Jh'),
+    chosen: { type: 'call', amount: 40 }, best: { type: 'fold', amount: 0 }
+  };
+}
+test('자리 분류: 프리플랍 open / vsOpen / vs3bet', function () {
+  const g = makeGame(6);
+  g.startHand();
+  const p1 = g.currentActor();
+  eq(H.review.spotOf(g, p1).spot, 'open');
+  g.act(p1.id, { type: 'raise', amount: 60 });
+  const p2 = g.currentActor();
+  eq(H.review.spotOf(g, p2).spot, 'vsOpen');
+  g.act(p2.id, { type: 'raise', amount: 180 });
+  const p3 = g.currentActor();
+  eq(H.review.spotOf(g, p3).spot, 'vs3bet');
+  eq(H.review.spotOf(g, p3).key, 'preflop/vs3bet');
+  assert(H.review.spotOf(g, p3).pos, '포지션이 있어야 한다');
+});
+test('자리 분류: 포스트플랍 cbet / checkedTo / vsBet', function () {
+  const g = makeGame(3);
+  g.startHand();
+  // BTN 오픈, SB 폴드, BB 콜 -> 플랍은 BB 부터
+  const btn = g.currentActor();
+  g.act(btn.id, { type: 'raise', amount: 60 });
+  g.act(g.currentActor().id, { type: 'fold' });
+  const bb = g.currentActor();
+  g.act(bb.id, { type: 'call' });
+  g.dealNextStreet();
+  eq(g.street, 'flop');
+  eq(g.currentActor(), bb);
+  eq(H.review.spotOf(g, bb).spot, 'checkedTo', 'BB 는 어그레서가 아니다');
+  g.act(bb.id, { type: 'check' });
+  eq(H.review.spotOf(g, btn).spot, 'cbet', '프리플랍 어그레서가 체크를 받으면 C벳 자리');
+  g.act(btn.id, { type: 'raise', amount: 60 });
+  eq(H.review.spotOf(g, bb).spot, 'vsBet');
+});
+test('리뷰 항목에 spot 이 붙는다', function () {
+  const g = makeGame(6);
+  g.startHand();
+  const p = g.currentActor();
+  const it = H.review.evaluate(g, p, { type: 'fold' }, { difficulty: 'normal' });
+  eq(it.spot, 'open');
+});
+test('결정을 자리·포지션별로 쌓고 약한 자리를 고른다', function () {
+  const pr = H.profile.create();
+  for (let i = 0; i < 6; i++) pr.addHand([fakeItem('flop', 'vsBet', 'BB', 2.0)]);
+  for (let i = 0; i < 6; i++) pr.addHand([fakeItem('preflop', 'open', 'BTN', 0.1)]);
+  pr.addHand([fakeItem('river', 'vsBet', 'SB', 9.0)]);   // 표본 1개 — 최대 약점이 되면 안 된다
+  eq(pr.decisions, 13);
+  eq(pr.hands, 13);
+  const w = pr.weakest();
+  eq(w[0].key, 'flop/vsBet', '표본이 충분한 자리 중 평균 손실이 큰 곳');
+  assert(Math.abs(w[0].avg - 2.0) < 1e-9);
+  eq(w[w.length - 1].key === 'river/vsBet' || w[1].key === 'preflop/open', true);
+  eq(pr.drillTarget(), 'flop/vsBet');
+  const pos = pr.byPosition().filter(function (r) { return r.n > 0; });
+  eq(pos.length, 3);
+  eq(pr.recent.length, 7, '실수/블런더만 최근 목록에 남는다');
+  eq(pr.table().length, 12, '자리 12개가 고정 순서로 나온다');
+});
+test('표본이 부족하면 드릴 목표가 없다', function () {
+  const pr = H.profile.create();
+  pr.addHand([fakeItem('turn', 'vsBet', 'BB', 5.0)]);
+  eq(pr.drillTarget(), null);
+});
+test('평균 손실이 "좋은 판단" 경계 아래면 약점이 아니다', function () {
+  const pr = H.profile.create();
+  for (let i = 0; i < 8; i++) pr.addHand([fakeItem('preflop', 'vsOpen', 'BB', 0.1)]);
+  eq(pr.drillTarget(), null);
+  eq(pr.weakSpots().length, 0);
+  for (let i = 0; i < 8; i++) pr.addHand([fakeItem('flop', 'vsBet', 'BB', 0.5)]);
+  eq(pr.drillTarget(), 'flop/vsBet');
+});
+test('드릴 결과는 실전 통계와 분리된다', function () {
+  const pr = H.profile.create();
+  for (let i = 0; i < 5; i++) pr.addHand([fakeItem('flop', 'vsBet', 'BB', 1.0)]);
+  pr.addDrill('flop/vsBet', 0);
+  pr.addDrill('flop/vsBet', 0.5);
+  const r = pr.table().filter(function (x) { return x.key === 'flop/vsBet'; })[0];
+  eq(r.n, 5); eq(r.drillN, 2);
+  assert(Math.abs(r.avg - 1.0) < 1e-9, '드릴이 실전 평균을 바꾸면 안 된다');
+  assert(Math.abs(r.drillAvg - 0.25) < 1e-9);
+});
+test('JSON 왕복', function () {
+  const pr = H.profile.create();
+  for (let i = 0; i < 3; i++) pr.addHand([fakeItem('flop', 'cbet', 'CO', 0.8)]);
+  const back = H.profile.create(JSON.parse(JSON.stringify(pr.toJSON())));
+  eq(back.decisions, 3);
+  eq(back.table().filter(function (x) { return x.key === 'flop/cbet'; })[0].n, 3);
+  eq(back.recent.length, 3);
+});
+
+console.log('\n[드릴]');
+test('모든 자리를 목표로 문제를 만들 수 있다', function () {
+  H.profile.allKeys().forEach(function (key) {
+    const r = H.drill.generate({ target: key, seed: 77 });
+    assert(r, key + ': 생성 실패');
+    assert(r.hero.isHuman && r.game.currentActor() === r.hero, key + ': 히어로 차례여야 한다');
+    eq(r.game.phase, 'awaiting-action');
+    if (r.reached) eq(r.spot.key, key, key + ': 목표 자리');
+    else eq(r.spot.spot, key.split('/')[1], key + ': 대체 출제는 같은 상황이어야 한다');
+  });
+});
+test('같은 시드면 같은 문제', function () {
+  const a = H.drill.generate({ target: 'flop/vsBet', seed: 4242 });
+  const b = H.drill.generate({ target: 'flop/vsBet', seed: 4242 });
+  eq(a.hero.cards.map(C.cardToString).join(' '), b.hero.cards.map(C.cardToString).join(' '));
+  eq(a.game.community.map(C.cardToString).join(' '), b.game.community.map(C.cardToString).join(' '));
+});
+test('히어로가 늘 버튼에 앉지 않는다', function () {
+  const seen = {};
+  for (let s = 1; s <= 12; s++) seen[H.drill.generate({ target: 'preflop/open', seed: s }).spot.pos] = true;
+  assert(Object.keys(seen).length >= 3, '포지션이 골고루 나와야 한다: ' + Object.keys(seen).join(','));
+});
+test('채점은 핸드 리뷰와 같은 기준이다', function () {
+  const r = H.drill.generate({ target: 'preflop/open', seed: 5 });
+  const hero = r.hero;
+  hero.cards = hand('7d 2c');
+  const bad = H.drill.grade(r.game, hero, { type: 'raise', amount: r.game.actionsFor(hero).minRaiseTo });
+  const good = H.drill.grade(r.game, hero, { type: r.game.actionsFor(hero).canCheck ? 'check' : 'fold' });
+  assert(bad.evLossBb > good.evLossBb, '72o 레이즈가 폴드보다 손실이 커야 한다');
+  assert(bad.explanation, '설명문이 있어야 한다');
+  eq(bad.spot, 'open');
+  const ses = new H.drill.Session('preflop/open');
+  ses.record(bad); ses.record(good);
+  eq(ses.asked, 2);
+  assert(ses.correct() >= 1);
+});
+
 console.log('\n[애드온]');
 test('애드온은 리바이 마지막 레벨에 한 번만', function () {
   const g = new H.Game({

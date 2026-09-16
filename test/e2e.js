@@ -279,6 +279,85 @@ async function playHands(page, target, opts) {
     await page.click('#btnReviewClose');
   }
 
+  console.log('\n[약점 프로파일과 드릴]');
+  /* 히어로는 무작위로 플레이하므로 여기까지 오는 동안 파산했을 수 있다 — 그러면 새 판을 연다.
+     프로파일은 localStorage 에 남아 있으므로 학습 탭 검사에는 영향이 없다. */
+  if (await dismissModals(page) === 'overModal') {
+    await page.click('#btnOverRestart');
+    await page.waitForSelector('#setupModal.show');
+    await page.fill('#optSeed', 'E2E002');
+    await page.click('#btnStart');
+    await page.waitForTimeout(600);
+  }
+  await safeClick(page, '.tab[data-tab="learn"]');
+  await page.waitForTimeout(200);
+  const handBeforeDrill = await page.evaluate(function () { return window.HoldemUI.game.handNo; });
+  const learn = await page.evaluate(function () {
+    const body = document.getElementById('tabBody');
+    return {
+      rows: body.querySelectorAll('.learn-table tbody tr').length,
+      decisions: window.HoldemUI.profile.decisions,
+      stored: !!localStorage.getItem('holdem.profile'),
+      anyBtn: !!document.getElementById('btnDrillAny')
+    };
+  });
+  check('학습 탭에 결정이 쌓인다', learn.decisions > 0 && learn.rows > 0, JSON.stringify(learn));
+  check('프로파일이 저장된다', learn.stored);
+  await page.click('#btnDrillAny');
+  await page.waitForTimeout(400);
+  const drill1 = await page.evaluate(function () {
+    return {
+      active: !!window.HoldemUI.drill,
+      heroTurn: window.HoldemUI.game.currentActor().isHuman,
+      hint: !document.getElementById('drillHint').classList.contains('hidden')
+        && document.getElementById('drillHint').textContent.length > 0,
+      buttons: !document.getElementById('btnRow').classList.contains('hidden'),
+      quit: !document.getElementById('btnDrillQuit').classList.contains('hidden'),
+      session: !!localStorage.getItem('holdem.session')
+    };
+  });
+  check('드릴이 히어로 차례에서 시작된다', drill1.active && drill1.heroTurn && drill1.hint && drill1.buttons, JSON.stringify(drill1));
+  check('드릴 도중에도 종료할 수 있다', drill1.quit);
+  const quizHints = await page.evaluate(function () {
+    return document.querySelectorAll('#heroReadout .equity, #heroReadout .outs').length;
+  });
+  check('문제 중에는 승률·아웃 힌트를 숨긴다', quizHints === 0, '힌트 ' + quizHints + '개');
+  check('드릴 시작 전 실전 게임이 세션으로 남는다', drill1.session);
+  await page.click('#btnCall');
+  await page.waitForTimeout(300);
+  const drill2 = await page.evaluate(function () {
+    const d = window.HoldemUI.drill;
+    return {
+      answered: !!d.item, fb: document.getElementById('drillFeedback').textContent.length > 10,
+      next: !document.getElementById('btnDrillNext').classList.contains('hidden'),
+      reveal: window.HoldemUI.game.revealAll, asked: d.session.asked,
+      cands: document.querySelectorAll('.drill-cand').length
+    };
+  });
+  check('답하면 채점 결과가 뜬다', drill2.answered && drill2.fb && drill2.next && drill2.asked === 1, JSON.stringify(drill2));
+  check('선택지별 EV 가 나열된다', drill2.cands >= 2);
+  check('답한 뒤 상대 패가 공개된다', drill2.reveal);
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(400);
+  const drill3 = await page.evaluate(function () {
+    return { item: !!window.HoldemUI.drill.item, heroTurn: window.HoldemUI.game.currentActor().isHuman };
+  });
+  check('Space 로 다음 문제가 나온다', !drill3.item && drill3.heroTurn, JSON.stringify(drill3));
+  await page.click('#btnDrillQuit');
+  await page.waitForTimeout(300);
+  const afterQuit = await page.evaluate(function () {
+    const m = document.querySelector('.modal.show');
+    return { modal: m ? m.id : null, resume: !document.getElementById('btnResume').hidden, drill: !!window.HoldemUI.drill };
+  });
+  check('종료하면 설정 화면으로 돌아가고 이어하기가 보인다', afterQuit.modal === 'setupModal' && afterQuit.resume && !afterQuit.drill, JSON.stringify(afterQuit));
+  await page.click('#btnResume');
+  await page.waitForTimeout(500);
+  const resumedAfterDrill = await page.evaluate(function () {
+    return { hand: window.HoldemUI.game.handNo, drill: !!window.HoldemUI.drill };
+  });
+  check('드릴 뒤 실전 게임을 이어간다', resumedAfterDrill.hand === handBeforeDrill && !resumedAfterDrill.drill,
+    handBeforeDrill + ' -> ' + JSON.stringify(resumedAfterDrill));
+
   console.log('\n[저장과 복원]');
   const before = await page.evaluate(function () {
     const g = window.HoldemUI.game;
@@ -338,7 +417,7 @@ async function playHands(page, target, opts) {
       lang: document.documentElement.lang
     };
   });
-  check('탭에 role/aria-selected 가 있다', a11y.tabs === 4 && a11y.tabsSelected === 4);
+  check('탭에 role/aria-selected 가 있다', a11y.tabs === 5 && a11y.tabsSelected === 5, a11y.tabs + '/' + a11y.tabsSelected);
   check('모달에 role=dialog 가 있다', a11y.dialogs >= 4, '개수 ' + a11y.dialogs);
   check('라이브 리전이 있다', a11y.liveRegions >= 2, '개수 ' + a11y.liveRegions);
   check('모든 버튼에 접근 가능한 이름이 있다', a11y.buttons === a11y.labelled,

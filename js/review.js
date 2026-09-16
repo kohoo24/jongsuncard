@@ -41,6 +41,29 @@
     return best;
   }
 
+  /*
+   * 결정이 놓인 자리. 약점 프로파일과 드릴이 같은 분류를 쓴다.
+   *   프리플랍  open (아직 레이즈 없음) · vsOpen (오픈에 직면) · vs3bet (3벳 이상에 직면)
+   *   포스트플랍 cbet (내가 어그레서, 체크 받음) · checkedTo (체크 받음) · vsBet (벳에 직면)
+   */
+  function spotOf(game, player) {
+    const a = game.actionsFor(player);
+    let spot;
+    if (game.street === 'preflop') {
+      spot = game.raisesThisStreet <= 1 ? 'open' : game.raisesThisStreet === 2 ? 'vsOpen' : 'vs3bet';
+    } else if (a.toCall > 0) {
+      spot = 'vsBet';
+    } else {
+      spot = game.lastAggressorId === player.id ? 'cbet' : 'checkedTo';
+    }
+    return {
+      street: game.street,
+      spot: spot,
+      key: game.street + '/' + spot,
+      pos: game.position(player)
+    };
+  }
+
   function actionLabel(c) {
     if (!c) return '?';
     if (c.type === 'fold') return T('act.fold');
@@ -88,6 +111,7 @@
     return {
       handNo: game.handNo,
       street: game.street,
+      spot: spotOf(game, player).spot,
       position: o.position,
       handPct: o.handPct,
       raisesBefore: game.raisesThisStreet,
@@ -171,6 +195,7 @@
     summarize: summarize,
     actionLabel: actionLabel,
     matchCandidate: matchCandidate,
+    spotOf: spotOf,
     THRESHOLDS: THRESHOLDS
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

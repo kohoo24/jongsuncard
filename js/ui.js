@@ -56,7 +56,8 @@
     heroInfo: null, drawInfo: null, reviewItems: [], lastSummary: null, handFinalized: false,
     seatPos: {}, dealOrder: {}, dealing: false, deckSig: '', deckAt: null,
     tab: 'log', chartState: { position: 'BTN', playerCount: 6, heroKey: null, userPicked: false },
-    sound: true, winningCards: [], busy: false
+    sound: true, winningCards: [], busy: false,
+    profile: null, drill: null
   };
   global.HoldemUI = state;
 
@@ -572,6 +573,14 @@
     function labeled(label, value) {
       return '<i class="lbl">' + label + '</i> <b>' + value + '</b>';
     }
+    if (state.drill) {
+      const d = state.drill;
+      item(labeled(T('drill.title'), d.target ? H.panels.spotLabel(d.target) : T('drill.targetAny')));
+      item(T('drill.progress', { correct: d.session.correct(), asked: d.session.asked }));
+      item(labeled(T('top.blinds'), g.smallBlind + '/' + g.bigBlind), true);
+      $('topMeta').innerHTML = parts.join('');
+      return;
+    }
     item(labeled(T('top.hand'), '#' + g.handNo));
     if (g.levelEvery) item(T('tour.level', { n: g.levelIndex + 1 }), true);
     item(labeled(T('top.blinds'), g.smallBlind + '/' + g.bigBlind + (g.ante ? '+' + g.ante : '')));
@@ -623,6 +632,9 @@
     }
     host.appendChild(chip('hand', handText));
 
+    /* 드릴 문제 중에는 승률·아웃이 곧 답이다 — 답한 뒤에만 보여준다 */
+    const quiz = state.drill && !state.drill.item;
+    if (quiz) return;
     if (state.settings.showEquity && state.heroInfo && g.phase !== 'hand-over' && g.phase !== 'show-choice') {
       host.appendChild(chip('equity', T('ctl.equity', { pct: Math.round(state.heroInfo.equity * 100) })));
       if (state.heroInfo.potOdds > 0) {
@@ -678,6 +690,9 @@
   function hide(el, v) { el.classList.toggle('hidden', !!v); }
 
   function updateControls() {
+    if (state.drill) { updateDrillControls(); return; }
+    hide($('drillRow'), true);
+    hide($('drillHint'), true);
     const g = state.game;
     const hero = g.byId(HERO_ID);
     const isHeroTurn = g.phase === 'awaiting-action' && g.currentActor() === hero;
@@ -706,6 +721,11 @@
       return;
     }
 
+    setupActionButtons(g, hero);
+  }
+
+  /* 폴드/콜/레이즈 버튼과 슬라이더를 현재 상황에 맞춘다 (실전과 드릴이 함께 쓴다) */
+  function setupActionButtons(g, hero) {
     const a = g.actionsFor(hero);
     $('btnFold').querySelector('span').textContent = T('ctl.fold');
     $('btnCall').querySelector('span').textContent = a.canCheck
@@ -959,6 +979,10 @@
     state.tracker.endHand(g);
     state.lastSummary = H.review.summarize(state.reviewItems, g.bigBlind);
     state.recorder.record(g, { review: state.reviewItems.slice() });
+    if (state.profile && state.reviewItems.length) {
+      state.profile.addHand(state.reviewItems);
+      H.profile.save(state.profile);
+    }
     if (state.settings.autoReview && state.reviewItems.length
       && state.lastSummary.total > g.bigBlind * 0.6) {
       // 다음 핸드가 이미 시작됐다면 띄우지 않는다 (클릭을 가로채는 문제)
@@ -971,6 +995,7 @@
 
   /* ==================== 히어로 액션 ==================== */
   function heroAct(action) {
+    if (state.drill) { drillAnswer(action); return; }
     const g = state.game;
     const hero = g.byId(HERO_ID);
     if (!hero || g.phase !== 'awaiting-action' || g.currentActor() !== hero) return;
@@ -1015,6 +1040,132 @@
     loop();
   }
 
+  /* ==================== 드릴 ==================== */
+  function startDrill(target) {
+    clearTimer(); stopClockTick();
+    if (state.game && !state.drill) saveSession();   // 진행 중이던 실전은 이어하기로 남긴다
+    closeModal('setupModal');
+    state.drill = {
+      target: target || null,
+      session: new H.drill.Session(target || null),
+      tracker: H.stats.create({ bigBlind: H.drill.BB }),
+      current: null, item: null
+    };
+    nextDrillSpot();
+  }
+
+  function nextDrillSpot() {
+    const d = state.drill;
+    if (!d) return;
+    let r = null;
+    try { r = H.drill.generate({ target: d.target, tracker: d.tracker, heroName: T('common.you') }); }
+    catch (e) { r = null; }
+    if (!r) { quitDrill(); return; }
+    d.current = r;
+    d.item = null;
+    state.game = r.game;
+    state.tracker = d.tracker;
+    state.recorder = H.history.create({ limit: 1 });
+    state.reviewItems = [];
+    state.lastSummary = null;
+    state.winningCards = [];
+    state.communityRendered = 0;
+    state.handFinalized = false;
+    state.dealing = false;
+    state.chartState.userPicked = false;
+    $('community').innerHTML = '';
+    H.equity.initWorker();
+    buildSeats();
+    computeDealOrder();
+    state.deckSig = '';
+    positionDeck(true);
+    refreshHeroInfo(true);
+    render();
+    positionDeck(true);
+  }
+
+  function drillAnswer(action) {
+    const d = state.drill, g = state.game;
+    const hero = g.byId(HERO_ID);
+    if (!hero || d.item || g.phase !== 'awaiting-action' || g.currentActor() !== hero) return;
+    let item = null;
+    try { item = H.drill.grade(g, hero, action, { tracker: d.tracker }); }
+    catch (e) { item = null; }
+    playActionSound(action, hero);
+    buzz(action.type === 'fold' ? 12 : 20);
+    if (!g.act(hero.id, action).ok) return;
+    g.revealAll = true;                    // 답한 뒤에는 상대 패를 보여준다
+    if (item) {
+      d.session.record(item);
+      d.item = item;
+      state.profile.addDrill(d.current.spot.key, item.evLossBb);
+      H.profile.save(state.profile);
+    }
+    render();
+  }
+
+  function updateDrillControls() {
+    const g = state.game, d = state.drill;
+    const hero = g.byId(HERO_ID);
+    const answered = !!d.item;
+    const isHeroTurn = !answered && g.phase === 'awaiting-action' && g.currentActor() === hero;
+    hide($('btnRow'), !isHeroTurn);
+    hide($('raiseRow'), !isHeroTurn);
+    hide($('showRow'), true);
+    hide($('addonRow'), true);
+    hide($('nextRow'), true);
+    hide($('waiting'), true);
+    hide($('btnReview'), true);
+    hide($('drillHint'), !isHeroTurn);
+    hide($('drillRow'), false);              // 종료 버튼은 문제 도중에도 보인다
+    hide($('drillFeedback'), !answered);
+    hide($('btnDrillNext'), !answered);
+    $('resultBanner').classList.remove('show');
+    if (isHeroTurn) {
+      const spot = d.current.spot;
+      const hint = $('drillHint');
+      hint.innerHTML = '';
+      hint.appendChild(document.createTextNode(T('drill.question', {
+        spot: H.panels.spotLabel(spot.key), pos: T('pos.' + spot.pos)
+      })));
+      if (!d.current.reached) {
+        const sub = document.createElement('span');
+        sub.className = 'sub';
+        sub.textContent = T('drill.fallback');
+        hint.appendChild(sub);
+      }
+      setupActionButtons(g, hero);
+    } else if (answered) {
+      H.panels.renderDrillFeedback(d.item, d.session, $('drillFeedback'));
+      $('btnDrillNext').focus();
+    }
+  }
+
+  function quitDrill() {
+    clearTimer(); stopClockTick();
+    state.drill = null;
+    state.game = null;
+    $('seats').innerHTML = '';
+    $('community').innerHTML = '';
+    $('pots').innerHTML = '';
+    $('topMeta').innerHTML = '';
+    $('heroReadout').innerHTML = '';
+    $('streetSummary').textContent = '';
+    ['btnRow', 'raiseRow', 'showRow', 'addonRow', 'nextRow', 'drillRow', 'drillHint'].forEach(function (id) {
+      hide($(id), true);
+    });
+    hide($('waiting'), false);
+    $('waiting').textContent = '';
+    buildSetup();
+    openModal('setupModal');
+  }
+
+  function resetProfile() {
+    if (!global.confirm(T('learn.resetConfirm'))) return;
+    state.profile = H.profile.reset();
+    refreshPanel();
+  }
+
   /* ==================== 패널 ==================== */
   function switchTab(tab) {
     state.tab = tab;
@@ -1028,7 +1179,12 @@
 
   function refreshPanel() {
     const host = $('tabBody');
-    if (!state.game || $('sidePanel').classList.contains('hidden')) return;
+    if ($('sidePanel').classList.contains('hidden')) return;
+    if (state.tab === 'learn') {
+      H.panels.renderLearn(state.profile, host, { onDrill: startDrill, onReset: resetProfile });
+      return;
+    }
+    if (!state.game) return;
     if (state.tab === 'log') H.panels.renderLog(state.game, host);
     else if (state.tab === 'stats') H.panels.renderStats(state.tracker, state.game, host, HERO_ID);
     else if (state.tab === 'hist') H.panels.renderHistory(state.recorder, host, HERO_ID, openReplay);
@@ -1253,7 +1409,7 @@
   }
 
   function saveSession() {
-    if (!state.game) return;
+    if (!state.game || state.drill) return;   // 드릴 판을 실전 세션 위에 덮어쓰면 안 된다
     try {
       H.storage.saveSession({
         settings: state.settings,
@@ -1352,6 +1508,11 @@
       render();
     });
     $('btnReview').addEventListener('click', openReview);
+    $('btnDrillNext').addEventListener('click', nextDrillSpot);
+    $('btnDrillQuit').addEventListener('click', quitDrill);
+    $('btnDrillFromSetup').addEventListener('click', function () {
+      startDrill(state.profile ? state.profile.drillTarget() : null);
+    });
     $('btnReviewClose').addEventListener('click', function () { closeModal('reviewModal'); });
     $('btnReplayClose').addEventListener('click', function () { closeModal('replayModal'); });
     $('btnShow').addEventListener('click', function () {
@@ -1407,7 +1568,8 @@
       else if (k === 'v') { e.preventDefault(); openReview(); }
       else if (e.key === ' ') {
         e.preventDefault();
-        if (!$('nextRow').classList.contains('hidden')) nextHand();
+        if (state.drill && !$('btnDrillNext').classList.contains('hidden')) nextDrillSpot();
+        else if (!$('nextRow').classList.contains('hidden')) nextHand();
       }
     });
 
@@ -1424,6 +1586,7 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     state.settings = H.storage.loadSettings();
+    state.profile = H.profile.load();
     state.sound = state.settings.sound !== false;
     H.i18n.setLang(state.settings.lang);
     bind();

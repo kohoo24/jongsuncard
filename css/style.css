@@ -552,6 +552,70 @@ button.ghost[aria-pressed="false"] { opacity: .45; }
 .rv-best { color: var(--gold); }
 .review-draws { font-size: 11px; color: #9fd4ff; margin-top: 3px; }
 
+/* 약점 프로파일 */
+.learn-summary { font-size: 12.5px; color: var(--text); margin-bottom: 8px; }
+.learn-note { font-size: 11px; color: var(--muted); margin: 4px 0 8px; }
+.learn-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+.learn-actions button.act { padding: 9px 12px; font-size: 12.5px; flex: 1 1 auto; }
+.weak-card {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(217, 83, 79, .10); border-left: 3px solid var(--red);
+  border-radius: 0 8px 8px 0; padding: 7px 10px; margin-bottom: 6px; font-size: 12px;
+}
+.weak-card .wk-name { flex: 1; font-weight: 600; }
+.weak-card .wk-avg { color: #ff9b8a; font-weight: 600; white-space: nowrap; }
+.weak-card .wk-drill { color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+.learn-table td.spot-col, .learn-table th.spot-col { text-align: left; white-space: normal; }
+.learn-table td.drill-col { padding-left: 6px; }
+.mini-btn {
+  background: rgba(255, 255, 255, .08); border: 1px solid var(--line); color: var(--text);
+  border-radius: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.mini-btn:hover { background: rgba(255, 255, 255, .16); }
+.mini-btn.danger { color: #ff9b8a; }
+.recent-row {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 11.5px; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, .05);
+}
+.recent-row .rc-cards { display: inline-flex; gap: 2px; }
+.recent-row .rc-spot { color: var(--muted); }
+.recent-row .rc-line { flex: 1; min-width: 120px; }
+.recent-row .rc-loss { color: #ff9b8a; font-weight: 600; margin-left: auto; }
+.mini-card {
+  display: inline-block; min-width: 22px; text-align: center;
+  background: #f4f1ea; color: #1b1b1b; border-radius: 3px; padding: 1px 3px;
+  font-size: 10.5px; font-weight: 700;
+}
+.mini-card.red { color: #c62828; }
+
+/* 드릴 */
+.drill-hint {
+  text-align: center; font-size: 13px; color: var(--gold); font-weight: 600;
+  padding: 6px 0 10px;
+}
+.drill-hint .sub { display: block; font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 3px; }
+.drill-row { margin-top: 4px; }
+.drill-feedback {
+  background: rgba(255, 255, 255, .04); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px;
+  font-size: 12.5px;
+}
+.drill-verdict { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
+.drill-verdict .rv-loss { margin-left: auto; font-size: 12.5px; }
+.drill-verdict.v-good { color: var(--green); }
+.drill-verdict.v-ok { color: var(--text); }
+.drill-verdict.v-mistake { color: var(--gold); }
+.drill-verdict.v-blunder { color: #ff9b8a; }
+.drill-explain { color: var(--muted); margin-top: 4px; }
+.drill-best { color: var(--gold); margin-top: 2px; }
+.drill-cands { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.drill-cand {
+  font-size: 11px; padding: 3px 8px; border-radius: 999px;
+  background: rgba(255, 255, 255, .06); color: var(--muted); white-space: nowrap;
+}
+.drill-cand.best { background: rgba(227, 185, 90, .18); color: var(--gold); }
+.drill-cand.mine { outline: 1px solid rgba(255, 255, 255, .35); color: var(--text); }
+.drill-session { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
 /* 리플레이 */
 .replay-board {
   display: flex; gap: 5px; justify-content: center; align-items: center;

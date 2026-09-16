@@ -405,6 +405,182 @@
     host.appendChild(legend);
   };
 
+  /* ==================== 약점 프로파일 ==================== */
+  function spotLabel(key) {
+    const parts = key.split('/');
+    return T('street.' + parts[0]) + ' · ' + T('spot.' + parts[1]);
+  }
+  H.panels.spotLabel = spotLabel;
+
+  function bbText(v) { return T('learn.avgBb', { avg: v.toFixed(2) }); }
+
+  function drillButton(key, onDrill) {
+    const b = el('button', 'mini-btn', T('learn.drillThis'));
+    b.type = 'button';
+    b.setAttribute('aria-label', T('learn.drillThis') + ': ' + spotLabel(key));
+    b.addEventListener('click', function () { onDrill(key); });
+    return b;
+  }
+
+  H.panels.renderLearn = function (profile, host, opts) {
+    opts = opts || {};
+    const onDrill = opts.onDrill || function () {};
+    host.innerHTML = '';
+    host.appendChild(el('h4', 'panel-sub', T('learn.title')));
+
+    const target = profile.drillTarget();
+    const actions = el('div', 'learn-actions');
+    const weakBtn = el('button', 'act gold', T('learn.drillWeakest'));
+    weakBtn.type = 'button';
+    weakBtn.id = 'btnDrillWeakest';
+    weakBtn.disabled = !target;
+    weakBtn.addEventListener('click', function () { onDrill(target); });
+    const anyBtn = el('button', 'act', T('learn.drillAny'));
+    anyBtn.type = 'button';
+    anyBtn.id = 'btnDrillAny';
+    anyBtn.addEventListener('click', function () { onDrill(null); });
+    actions.appendChild(weakBtn);
+    actions.appendChild(anyBtn);
+    host.appendChild(actions);
+
+    if (!profile.decisions) {
+      host.appendChild(el('p', 'empty', T('learn.empty')));
+      return;
+    }
+
+    host.appendChild(el('div', 'learn-summary', T('learn.summary', {
+      hands: profile.hands, n: profile.decisions,
+      avg: (profile.loss / profile.decisions).toFixed(2)
+    })));
+
+    /* 가장 약한 자리 (표본이 충분한 곳만) */
+    const weak = profile.weakSpots().slice(0, 3);
+    if (weak.length) {
+      host.appendChild(el('h4', 'panel-sub', T('learn.weakest')));
+      weak.forEach(function (r) {
+        const card = el('div', 'weak-card');
+        card.appendChild(el('span', 'wk-name', spotLabel(r.key)));
+        card.appendChild(el('span', 'wk-avg', bbText(r.avg)));
+        if (r.drillN) {
+          card.appendChild(el('span', 'wk-drill', T('learn.drillAvg', { n: r.drillN, avg: r.drillAvg.toFixed(2) })));
+        }
+        card.appendChild(drillButton(r.key, onDrill));
+        host.appendChild(card);
+      });
+    } else {
+      host.appendChild(el('p', 'learn-note', T('learn.fewSamples', { n: H.profile.MIN_SAMPLE })));
+    }
+
+    /* 자리별 표 */
+    function table(title, rows, withDrill) {
+      host.appendChild(el('h4', 'panel-sub', title));
+      const t = el('table', 'stats-table learn-table');
+      const thead = el('thead');
+      const hr = el('tr');
+      hr.appendChild(el('th', 'spot-col', ''));
+      hr.appendChild(el('th', null, T('learn.colN')));
+      hr.appendChild(el('th', null, T('learn.colAvg')));
+      hr.appendChild(el('th', null, T('learn.colMistakes')));
+      if (withDrill) hr.appendChild(el('th', null, ''));
+      thead.appendChild(hr);
+      t.appendChild(thead);
+      const tbody = el('tbody');
+      rows.forEach(function (r) {
+        const tr = el('tr');
+        tr.appendChild(el('td', 'spot-col', withDrill ? spotLabel(r.key) : T('pos.' + r.key)));
+        tr.appendChild(el('td', null, String(r.n)));
+        const avg = el('td', r.avg > 0.6 ? 'neg' : r.avg < 0.15 ? 'pos' : null, r.avg.toFixed(2));
+        if (r.drillN) avg.title = T('learn.drillAvg', { n: r.drillN, avg: r.drillAvg.toFixed(2) });
+        tr.appendChild(avg);
+        tr.appendChild(el('td', null, Math.round(r.mistakeRate * 100) + '%'));
+        if (withDrill) {
+          const td = el('td', 'drill-col');
+          td.appendChild(drillButton(r.key, onDrill));
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      });
+      t.appendChild(tbody);
+      const wrap = el('div', 'stats-wrap');
+      wrap.appendChild(t);
+      host.appendChild(wrap);
+    }
+    table(T('learn.bySpot'), profile.table().filter(function (r) { return r.n > 0; }), true);
+    table(T('learn.byPos'), profile.byPosition().filter(function (r) { return r.n > 0; }), false);
+
+    /* 최근 실수 */
+    if (profile.recent.length) {
+      host.appendChild(el('h4', 'panel-sub', T('learn.recent')));
+      profile.recent.slice(-8).reverse().forEach(function (m) {
+        const row = el('div', 'recent-row');
+        const cards = el('span', 'rc-cards');
+        m.cards.forEach(function (c) { cards.appendChild(miniCardStr(c)); });
+        if (m.board.length) {
+          cards.appendChild(el('span', 'muted', ' | '));
+          m.board.forEach(function (c) { cards.appendChild(miniCardStr(c)); });
+        }
+        row.appendChild(cards);
+        row.appendChild(el('span', 'rc-spot', spotLabel(m.key) + (m.pos ? ' · ' + T('pos.' + m.pos) : '')));
+        row.appendChild(el('span', 'rc-line',
+          H.review.actionLabel(m.chosen) + ' → ' + H.review.actionLabel(m.best)));
+        row.appendChild(el('span', 'rc-loss', '-' + m.lossBb.toFixed(1) + ' bb'));
+        host.appendChild(row);
+      });
+    }
+
+    const reset = el('button', 'mini-btn danger', T('learn.reset'));
+    reset.type = 'button';
+    reset.id = 'btnProfileReset';
+    reset.style.marginTop = '12px';
+    reset.addEventListener('click', function () { if (opts.onReset) opts.onReset(); });
+    host.appendChild(reset);
+  };
+
+  function miniCardStr(str) {
+    const c = H.cards.parseCard(str);
+    const m = el('span', 'mini-card' + (H.cards.isRed(c) ? ' red' : ''));
+    m.textContent = H.cards.RANK_LABEL[c.rank] + H.cards.SUIT_LABEL[c.suit];
+    return m;
+  }
+
+  /* ==================== 드릴 피드백 ==================== */
+  H.panels.renderDrillFeedback = function (item, session, host, opts) {
+    opts = opts || {};
+    host.innerHTML = '';
+    const v = el('div', 'drill-verdict v-' + item.verdict);
+    v.appendChild(el('span', 'rv-icon', item.verdictIcon));
+    v.appendChild(el('span', null, item.verdictText));
+    if (item.evLossBb >= 0.15) {
+      v.appendChild(el('span', 'rv-loss', T('drill.loss', { bb: item.evLossBb.toFixed(1) })));
+    }
+    host.appendChild(v);
+    host.appendChild(el('div', 'drill-explain', item.explanation || H.review.explain(item)));
+    if (item.best.type !== item.chosen.type || item.best.amount !== item.chosen.amount) {
+      host.appendChild(el('div', 'drill-best', T('drill.bestWas', { action: H.review.actionLabel(item.best) })));
+    }
+    const cands = el('div', 'drill-cands');
+    cands.setAttribute('aria-label', T('drill.options'));
+    const same = function (a, b) { return a.type === b.type && (a.amount || 0) === (b.amount || 0); };
+    const shown = item.candidates.slice(0, 3);
+    item.candidates.forEach(function (c) {
+      if ((same(c, item.best) || same(c, item.chosen)) && shown.indexOf(c) < 0) shown.push(c);
+    });
+    shown.sort(function (a, b) { return b.ev - a.ev; });
+    shown.forEach(function (c) {
+      const isBest = same(c, item.best);
+      const isMine = same(c, item.chosen);
+      const chip = el('span', 'drill-cand' + (isBest ? ' best' : '') + (isMine ? ' mine' : ''),
+        H.review.actionLabel(c) + ' · ' + (c.ev >= 0 ? '+' : '') + Math.round(c.ev));
+      cands.appendChild(chip);
+    });
+    host.appendChild(cands);
+    if (session) {
+      host.appendChild(el('div', 'drill-session', T('drill.summary', {
+        asked: session.asked, correct: session.correct(), bb: session.lossBb.toFixed(1)
+      })));
+    }
+  };
+
   /* ==================== 핸드 리뷰 ==================== */
   H.panels.renderReview = function (summary, host) {
     host.innerHTML = '';
