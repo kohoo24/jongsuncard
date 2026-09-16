@@ -2,6 +2,7 @@
 module.exports = [
   {
     files: ['js/**/*.js', 'sw.js'],
+    ignores: ['js/preflop-table.js'],
     languageOptions: {
       ecmaVersion: 2020,
       sourceType: 'script',
@@ -30,6 +31,15 @@ module.exports = [
       'no-var': 'off',
       semi: ['error', 'always']
     }
+  },
+  {
+    files: ['tools/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      sourceType: 'script',
+      globals: { require: 'readonly', module: 'writable', console: 'readonly', process: 'readonly', __dirname: 'readonly' }
+    },
+    rules: { 'no-unused-vars': ['warn', { args: 'none', caughtErrors: 'none' }] }
   },
   {
     files: ['test/**/*.js'],

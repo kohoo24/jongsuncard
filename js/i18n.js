@@ -245,6 +245,9 @@
 
     /* --- 약점 프로파일 / 드릴 --- */
     'tab.learn': ['학습', 'Learn'],
+    'chart.solver': ['솔버', 'Solver'],
+    'chart.freq': ['오픈 빈도 {pct}%', 'Open {pct}%'],
+    'chart.mixed': ['가끔 (혼합)', 'Sometimes (mixed)'],
     'learn.title': ['약점 프로파일', 'Weakness profile'],
     'learn.empty': ['아직 데이터가 없습니다. 핸드를 플레이하면 결정마다 쌓입니다.',
       'No data yet. Every decision you make in a hand is added here.'],

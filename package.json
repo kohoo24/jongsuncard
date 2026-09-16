@@ -9,7 +9,8 @@
     "test:sw": "node test/sw.js",
     "bench": "node test/bench.js",
     "bench:9": "node test/bench.js normal,hard 6 500 9",
-    "lint": "eslint js sw.js test",
+    "lint": "eslint js sw.js test tools",
+    "solve": "node tools/solve-preflop.js",
     "start": "python3 -m http.server 8000"
   },
   "license": "MIT",

@@ -17,7 +17,7 @@
   const H = global.Holdem || (global.Holdem = {});
   if (typeof require === 'function') {
     require('./cards.js'); require('./evaluator.js'); require('./rng.js');
-    require('./ranges.js'); require('./equity.js'); require('./stats.js');
+    require('./ranges.js'); require('./equity.js'); require('./stats.js'); require('./preflop.js');
   }
   const R = H.ranges, E = H.equity;
 
@@ -62,6 +62,18 @@
      * v2(상대의 벳·체크 레인지 모델링) +2.2~+7.2. 리뷰 판정과 결정 시간(1.3ms)은 문제없었다.
      * 다음 시도는 레이즈 후보의 "콜당한 뒤" 가지에도 같은 모델을 적용해 일관성을 맞추는 것.
      */
+    /*
+     * 프리플랍 솔버 테이블(js/preflop-table.js). 결정에 쓰면 TAG 벤치마크(4인 고급 10시드)에서
+     * +9.0 → -10.6 으로 나빠진다: 솔버의 넓은 블라인드 디펜스(BB 57% 콜)를 우리 포스트플랍이
+     * 살리지 못하고 플랍에서 접는 손실이 -13.7 → -49.5 bb/100 로 는다. 실현율을 낮춰 다시 풀어도
+     * (-12, -11, -10) 같다. 레인지 역산에만 써도 9인에서 +5.1 → -3.8. 둘 다 기본 꺼짐이고,
+     * 표는 프리플랍 차트(학습)에 쓴다.
+     */
+    solver: false,           // 프리플랍 결정에 솔버 빈도를 쓴다 (보통·고급)
+    solverRanges: false,     // 상대 레인지 역산에 솔버 빈도를 가중치로
+    cbetAware: false,        // 어그레서의 플랍 첫 벳을 넓게 본다 — 단독 +9.0 → +4.5, 효과 없음
+    cbetKeep: 0.55,          // 그때 벳 레인지 폭의 하한 (프로파일 없을 때)
+    cbetMinSamples: 12,      // 프로파일링으로 실제 C벳 빈도를 쓰기 위한 최소 기회 수
     lookahead: false,
     lookCards: 10,           // 표본 카드 수
     lookCombos: 260,         // 상대별 볼 콤보 수 (가중치 상위)
@@ -98,11 +110,11 @@
       mistakes: 0.22, bluffScale: 0.55, wideFactor: 1.55, sizeGrid: [0.75]
     },
     normal: {
-      key: 'normal', sims: 1400, useRanges: true, useProfiling: false,
+      key: 'normal', sims: 1400, useRanges: true, useProfiling: false, useSolver: true,
       mistakes: 0.05, bluffScale: 1.00, wideFactor: 1.00, sizeGrid: [0.45, 0.72, 1.10]
     },
     hard: {
-      key: 'hard', sims: 2800, useRanges: true, useProfiling: true,
+      key: 'hard', sims: 2800, useRanges: true, useProfiling: true, useSolver: true,
       mistakes: 0.00, bluffScale: 1.15, wideFactor: 0.98, sizeGrid: [0.30, 0.50, 0.75, 1.05, 1.45]
     }
   };
@@ -212,7 +224,14 @@
     } else {
       const pre = game.actionsOf(opp.id, 'preflop');
       const W = R.ACTION_WEIGHTS;
-      if (!pre.length) {
+      /* 솔버 표가 있으면 상대의 마지막 프리플랍 액션이 놓였던 상황의 빈도를 가중치로 쓴다.
+         프로파일링(VPIP 비율)은 오픈·콜 가중치를 비례 확대/축소한다. */
+      const solverW = (ctx.diff.useSolver && TUNE.solverRanges && H.preflop && H.preflop.available() && pre.length)
+        ? solverWeightsFor(game, opp, pre[pre.length - 1], openPct / R.openPercent(pos, n))
+        : null;
+      if (solverW) {
+        weights = solverW;
+      } else if (!pre.length) {
         weights = W.open(Math.min(1, openPct * 2.2));
       } else {
         let raises = 0, called = false, facedRaise = false;
@@ -235,19 +254,113 @@
     let keepTop = 1;
     if (ctx.diff.useRanges) {
       const acts = game.handActions;
+      /* 프리플랍 어그레서의 플랍 첫 벳(C벳)은 사이즈가 말하는 것보다 넓다 — 많은 상대가 손과 무관하게
+         C벳한다. 프로파일링이 있으면 실제 C벳 빈도를, 없으면 기본값을 벳 레인지 폭의 하한으로 쓴다. */
+      let pfrId = null, pfrRaises = -1;
+      for (let i = 0; i < acts.length; i++) {
+        if (acts[i].street === 'preflop' && acts[i].type === 'raise' && acts[i].raisesBefore > pfrRaises) { pfrRaises = acts[i].raisesBefore; pfrId = acts[i].playerId; }
+      }
+      let cbetKeep = TUNE.cbetKeep;
+      if (ctx.diff.useProfiling && ctx.tracker) {
+        const st = ctx.tracker.get(opp.id);
+        if (st && st.samples.cbetOpp >= TUNE.cbetMinSamples) cbetKeep = Math.max(0.2, Math.min(0.95, st.cbetFlop));
+      }
+      let seenFlop = false;
       for (let i = 0; i < acts.length; i++) {
         const act = acts[i];
         if (act.playerId !== opp.id || act.street === 'preflop') continue;
         if (act.type === 'raise') {
           const ratio = act.potBefore > 0 ? (act.amount - act.currentBetBefore) / act.potBefore : 1;
-          const k = act.raisesBefore > 0 ? 0.20 : keepForRatio(ratio);
+          let k = act.raisesBefore > 0 ? 0.20 : keepForRatio(ratio);
+          const isCbet = TUNE.cbetAware && act.street === 'flop' && !seenFlop && act.currentBetBefore === 0 && opp.id === pfrId;
+          if (isCbet) k = Math.max(k, cbetKeep);
           keepTop = Math.min(keepTop, k);
         } else if (act.type === 'call') {
           keepTop = Math.min(keepTop, 0.62);
         }
+        if (act.street === 'flop') seenFlop = true;
       }
     }
     return { weights: weights, band: band, keepTop: keepTop, pos: pos, id: opp.id };
+  }
+
+  /* ---------- 프리플랍 솔버 ---------- */
+  /* 상대가 act 를 했을 때의 상황에서 그 액션의 빈도 배열 */
+  function solverWeightsFor(game, opp, act, vpipMult) {
+    if (act.type !== 'raise' && act.type !== 'call') return null;
+    const n = game.players.length;
+    const pos = game.position(opp);
+    const sit = H.preflop.situationOf(game, opp, act.raisesBefore);
+    if (sit.sit === 'open' && act.type === 'call') return null;   // 림프: 휴리스틱
+    const w = H.preflop.weights(n, pos, sit.sit, act.type === 'raise' ? 'raise' : 'call');
+    if (!w) return null;
+    let mass = 0;
+    for (let i = 0; i < w.length; i++) mass += w[i];
+    if (mass < 0.5) return null;     // 표가 거의 비어 있으면(드문 상황) 휴리스틱으로
+    if (vpipMult && vpipMult !== 1 && (sit.sit === 'open' || sit.sit.indexOf('vsOpen') === 0)) {
+      /* 넓게 치는 상대: 빈도가 0 인 클래스에도 조금 들어온다. 좁은 상대: 낮은 빈도가 먼저 빠진다 */
+      const out = new Float32Array(w.length);
+      for (let i = 0; i < w.length; i++) {
+        out[i] = vpipMult > 1
+          ? Math.min(1, w[i] * vpipMult + (vpipMult - 1) * 0.15)
+          : Math.max(0, w[i] - (1 - vpipMult) * 0.6);
+      }
+      return out;
+    }
+    return w;
+  }
+
+  /*
+   * 솔버 테이블로 프리플랍 결정. 빈도를 성향·난이도로 살짝 비틀고 난수로 섞어 친다.
+   * 표에 없는 상황(림프 팟, 표 밖 인원)이면 null → 휴리스틱.
+   */
+  function solverPreflop(ctx) {
+    const game = ctx.game, player = ctx.player, a = ctx.a, prof = ctx.prof, diff = ctx.diff, rand = ctx.rand;
+    const bb = game.bigBlind;
+    const sit = H.preflop.situationOf(game, player);
+    const cls = R.classOf(player.cards[0], player.cards[1]);
+    const f = H.preflop.freq(ctx.n, ctx.pos, sit.sit, cls);
+    if (!f) return null;
+
+    let raise = f.raise, call = f.call;
+    if (sit.sit === 'open') raise *= prof.openMult * diff.wideFactor;
+    else raise *= Math.sqrt(prof.bluffMult);
+    call *= prof.callMult * diff.wideFactor;
+    if (sit.cold) { call *= 0.5; raise *= 0.6; }          // 콜드 4벳/콜 자리는 표가 오프너 기준이라 보수적으로
+    if (countLimpers(game) > 0 && sit.sit === 'open') raise = Math.min(1, raise * 1.1);   // 림퍼 아이솔
+    raise = Math.max(0, Math.min(1, raise));
+    call = Math.max(0, Math.min(1, call));
+    if (raise + call > 1) { const s = 1 / (raise + call); raise *= s; call *= s; }
+
+    ctx.think.handPct = R.percentile(cls);
+    ctx.think.solver = { sit: sit.sit, raise: raise, call: call };
+    const u = rand();
+    if (u < raise && a.canRaise) {
+      const sizes = H.preflop.sizes() || { open: 2.5, openSb: 3, threeBetIp: 3, threeBetOop: 3.5, fourBet: 2.3 };
+      const inBlinds = ctx.pos === 'SB' || ctx.pos === 'BB';
+      let target;
+      if (sit.raises <= 1) {
+        const base = (ctx.pos === 'SB' ? sizes.openSb : sizes.open) + TUNE.openPerPlayerOver6 * Math.max(0, ctx.n - 6);
+        target = bb * (base + countLimpers(game)) * prof.sizeMult + (game.currentBet - bb);
+        ctx.think.plan = 'open';
+      } else if (sit.raises === 2) {
+        target = game.currentBet * (inBlinds ? sizes.threeBetOop : sizes.threeBetIp);
+        ctx.think.plan = R.percentile(cls) <= 0.06 ? '3bet-value' : '3bet-bluff';
+      } else if (sit.raises === 3) {
+        target = game.currentBet * sizes.fourBet;
+        ctx.think.plan = '4bet-value';
+      } else {
+        target = a.maxRaiseTo;
+        ctx.think.plan = 'push';
+      }
+      return raiseTo(ctx, target);
+    }
+    if (u < raise + call) {
+      ctx.think.plan = a.canCheck ? 'check' : 'call';
+      return { type: a.canCheck ? 'check' : 'call' };
+    }
+    ctx.think.plan = a.canCheck ? 'check' : 'fold';
+    return { type: a.canCheck ? 'check' : 'fold' };
   }
 
   /* ---------- 레이즈 금액 정리 ---------- */
@@ -285,6 +398,12 @@
       if (a.canCheck) return { type: 'check' };
       if (myPct <= push * 1.7 && a.toCall <= bb * 1.5) return { type: 'call' };
       return { type: 'fold' };
+    }
+
+    /* 솔버 테이블 (보통·고급) */
+    if (diff.useSolver && TUNE.solver && H.preflop && H.preflop.available()) {
+      const sd = solverPreflop(ctx);
+      if (sd) return sd;
     }
 
     /* 아직 아무도 레이즈하지 않음 */

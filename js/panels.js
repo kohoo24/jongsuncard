@@ -376,18 +376,29 @@
     });
     host.appendChild(bar);
 
-    const openPct = R.openPercent(state.position, state.playerCount || 6);
+    const n = state.playerCount || 6;
+    /* 솔버 표가 있으면 오픈 빈도(혼합 전략)를 음영으로, 없으면 휴리스틱 임계값 */
+    const solver = H.preflop && H.preflop.available() ? H.preflop.weights(n, state.position, 'open', 'raise') : null;
+    let openPct = R.openPercent(state.position, n);
+    if (solver) {
+      let mass = 0;
+      for (let i = 0; i < solver.length; i++) mass += solver[i] * R.INFO[R.RANKED[i][0]].combos;
+      openPct = mass / 1326;
+    }
     host.appendChild(el('p', 'chart-note',
-      T('pos.' + state.position) + ' · ' + T('chart.pct', { pct: Math.round(openPct * 100) })));
+      T('pos.' + state.position) + ' · ' + T('chart.pct', { pct: Math.round(openPct * 100) }) +
+      (solver ? ' · ' + T('chart.solver') : '')));
 
     const grid = el('div', 'range-grid');
     R.chartGrid().forEach(function (row) {
       row.forEach(function (key) {
         const info = R.INFO[key];
-        const inRange = info && info.pct <= openPct;
-        const cell = el('div', 'range-cell' + (inRange ? ' in' : ''), key);
+        const f = solver ? solver[info.index] : (info.pct <= openPct ? 1 : 0);
+        const cell = el('div', 'range-cell' + (f >= 0.67 ? ' in' : f > 0.05 ? ' mix' : ''), key);
+        if (f > 0.05 && f < 0.67) cell.style.setProperty('--f', f.toFixed(2));
         if (state.heroKey === key) cell.classList.add('mine');
-        cell.title = key + ' · ' + T('chart.pct', { pct: (info.pct * 100).toFixed(1) });
+        cell.title = key + ' · ' + T('chart.pct', { pct: (info.pct * 100).toFixed(1) }) +
+          (solver ? ' · ' + T('chart.freq', { pct: Math.round(f * 100) }) : '');
         grid.appendChild(cell);
       });
     });
@@ -400,7 +411,14 @@
     const b2 = el('span', 'legend-item');
     const bi = el('i'); bi.className = 'sw-out'; b2.appendChild(bi);
     b2.appendChild(document.createTextNode(T('chart.outRange')));
-    legend.appendChild(a); legend.appendChild(b2);
+    legend.appendChild(a);
+    if (solver) {
+      const m = el('span', 'legend-item');
+      const mi = el('i'); mi.className = 'sw-mix'; m.appendChild(mi);
+      m.appendChild(document.createTextNode(T('chart.mixed')));
+      legend.appendChild(m);
+    }
+    legend.appendChild(b2);
     if (state.heroKey) {
       const c = el('span', 'legend-item');
       const ci = el('i'); ci.className = 'sw-mine'; c.appendChild(ci);

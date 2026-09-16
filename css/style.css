@@ -465,6 +465,8 @@ button.ghost[aria-pressed="false"] { opacity: .45; }
 .legend-item i.sw-in { background: var(--gold); height: 10px; border-radius: 2px; }
 .legend-item i.sw-out { background: rgba(255, 255, 255, .12); height: 10px; border-radius: 2px; }
 .legend-item i.sw-mine { background: var(--green); height: 10px; border-radius: 2px; }
+.legend-item i.sw-mix { background: rgba(227, 185, 90, .45); height: 10px; border-radius: 2px; }
+.range-cell.mix { background: rgba(227, 185, 90, calc(.15 + var(--f, .3) * .55)); color: var(--text); }
 
 /* 히스토리 */
 .hist-list { display: flex; flex-direction: column; gap: 6px; }

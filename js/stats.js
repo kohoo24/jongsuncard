@@ -13,6 +13,7 @@
       vpip: 0,          // 프리플랍에 자발적으로 칩을 넣은 핸드 수
       pfr: 0,           // 프리플랍 레이즈 핸드 수
       threeBetOpp: 0, threeBet: 0,
+      cbetOpp: 0, cbet: 0,   // 프리플랍 어그레서로 플랍에서 먼저 벳할 기회 / 실제 C벳
       bets: 0,          // 벳/레이즈 횟수
       calls: 0,         // 콜 횟수
       facedBet: 0, foldedToBet: 0,
@@ -61,12 +62,27 @@
     const reachedFlop = game.community.length >= 3;
     const wentToShowdown = !!(game.results && !game.results.uncontested);
 
+    /* 프리플랍 어그레서 = 마지막 프리플랍 레이저 */
+    let pfrId = null, pfrRaises = -1;
+    game.handActions.forEach(function (a) {
+      if (a.street === 'preflop' && a.type === 'raise' && a.raisesBefore > pfrRaises) { pfrRaises = a.raisesBefore; pfrId = a.playerId; }
+    });
+
     game.players.forEach(function (p) {
       const d = self.ensure(p.id, p.name);
       const acts = game.actionsOf(p.id);
       if (!acts.length && p.totalBet === 0) return;   // 참여하지 않은 핸드
 
       d.hands++;
+
+      /* C벳: 어그레서가 플랍에서 아직 벳이 없을 때 처음 행동한 경우 */
+      if (p.id === pfrId) {
+        const firstFlop = acts.filter(function (a) { return a.street === 'flop'; })[0];
+        if (firstFlop && firstFlop.currentBetBefore === 0) {
+          d.cbetOpp = (d.cbetOpp || 0) + 1;
+          if (firstFlop.type === 'raise') d.cbet = (d.cbet || 0) + 1;
+        }
+      }
 
       const pre = acts.filter(function (a) { return a.street === 'preflop'; });
       let voluntary = false, raisedPre = false, foldedPre = false;
@@ -126,6 +142,7 @@
       vpip: pct(d.vpip, d.hands),
       pfr: pct(d.pfr, d.hands),
       threeBet: pct(d.threeBet, d.threeBetOpp),
+      cbetFlop: pct(d.cbet || 0, d.cbetOpp || 0),
       af: d.calls > 0 ? d.bets / d.calls : (d.bets > 0 ? d.bets : 0),
       foldToBet: pct(d.foldedToBet, d.facedBet),
       foldToBetPre: pct(d.foldedToBetPre, d.facedBetPre),
@@ -137,6 +154,7 @@
       initialChips: d.initialChips,
       bb100: d.hands > 0 ? (d.net / this.bigBlind) / d.hands * 100 : 0,
       samples: {
+        cbetOpp: d.cbetOpp || 0,
         facedBet: d.facedBet, facedBetPre: d.facedBetPre, facedBetPost: d.facedBetPost,
         threeBetOpp: d.threeBetOpp, showdown: d.showdown
       }

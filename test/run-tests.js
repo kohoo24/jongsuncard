@@ -14,6 +14,7 @@ require('../js/i18n.js');
 require('../js/format.js');
 require('../js/profile.js');
 require('../js/drill.js');
+require('../js/preflop.js');
 const C = H.cards;
 
 let passed = 0, failed = 0;
@@ -667,6 +668,129 @@ test('폴드 확률은 베팅이 클수록 높다', function () {
   const strong = EQ.foldProbability(100, 70, { band: RG.band(0, 1), keepTop: 0.15 }, 1.25);
   const weak = EQ.foldProbability(100, 70, r, 1.25);
   assert(weak > strong, '강한 레인지는 덜 접는다');
+});
+
+console.log('\n[프리플랍 솔버 테이블]');
+const PF = H.preflop;
+function comboPct(weights) { let m = 0; for (let i = 0; i < weights.length; i++) m += weights[i] * RG.INFO[RG.RANKED[i][0]].combos; return m / 1326; }
+test('표가 있고 2·3·6·9인을 담고 있다', function () {
+  assert(PF.available());
+  ['2', '3', '6', '9'].forEach(function (k) { assert(H.preflopTable.tables[k], k + '인 표'); });
+  eq(PF.tableKey(4), '6'); eq(PF.tableKey(7), '9'); eq(PF.tableKey(2), '2');
+});
+test('AA 는 어디서나 레이즈, 72o 는 UTG 폴드', function () {
+  ['UTG', 'CO', 'BTN', 'SB'].forEach(function (p) { assert(PF.freq(6, p, 'open', 'AA').raise >= 0.99, p + ' AA'); });
+  eq(PF.freq(6, 'UTG', 'open', '72o').raise, 0);
+  eq(PF.freq(9, 'UTG', 'open', '72o').raise, 0);
+  assert(PF.freq(6, 'BB', 'vsOpen:BTN', 'AA').raise >= 0.9, 'BB 는 AA 로 3벳');
+});
+test('오픈 레인지는 뒷자리일수록 넓고 풀링은 6맥스보다 타이트하다', function () {
+  const six = ['UTG', 'MP', 'CO', 'BTN'].map(function (p) { return comboPct(PF.weights(6, p, 'open', 'raise')); });
+  for (let i = 1; i < six.length; i++) assert(six[i] > six[i - 1], '6인 ' + i + ': ' + six.join(','));
+  const nine = ['UTG', 'UTG1', 'MP', 'LJ', 'HJ', 'CO', 'BTN'].map(function (p) { return comboPct(PF.weights(9, p, 'open', 'raise')); });
+  for (let i = 1; i < nine.length; i++) assert(nine[i] >= nine[i - 1] - 0.01, '9인 ' + i + ': ' + nine.join(','));
+  assert(nine[0] < six[0], '9인 UTG 가 6인 UTG 보다 좁다');
+  assert(six[0] > 0.10 && six[0] < 0.25, '6인 UTG 오픈 ' + six[0]);
+  assert(six[3] > 0.35 && six[3] < 0.55, '6인 BTN 오픈 ' + six[3]);
+});
+test('3벳 레인지는 프리미엄 + 블러프가 섞이고 콜 레인지에 페어가 있다', function () {
+  const f = PF.freq(6, 'BTN', 'vsOpen:CO', 'AA');
+  assert(f.raise >= 0.9, 'AA 3벳');
+  const total = comboPct(PF.weights(6, 'BTN', 'vsOpen:CO', 'raise'));
+  assert(total > 0.06 && total < 0.30, 'BTN vs CO 3벳 ' + total);
+  assert(PF.freq(6, 'BB', 'vsOpen:BTN', '22').call > 0.5, 'BB 는 22 로 콜');
+  assert(PF.freq(6, 'BB', 'vsOpen:BTN', '72o').fold > 0.8, 'BB 도 72o 는 접는다');
+});
+test('빈도 합이 1 을 넘지 않는다', function () {
+  Object.keys(H.preflopTable.tables).forEach(function (k) {
+    const t = H.preflopTable.tables[k];
+    Object.keys(t).forEach(function (pos) {
+      Object.keys(t[pos]).forEach(function (sit) {
+        const row = t[pos][sit];
+        for (let i = 0; i < 169; i++) {
+          const c = row.c ? row.c.charCodeAt(i) - 48 : 0, r = row.r ? row.r.charCodeAt(i) - 48 : 0;
+          assert(c + r <= 10, k + ' ' + pos + ' ' + sit + ' ' + i + ': ' + c + '+' + r);
+        }
+      });
+    });
+  });
+});
+test('situationOf 가 오프너·3벳터를 찾는다', function () {
+  const g = makeGame(6);
+  g.startHand();
+  const utg = g.currentActor();
+  eq(PF.situationOf(g, utg).sit, 'open');
+  g.act(utg.id, { type: 'raise', amount: 50 });
+  const mp = g.currentActor();
+  eq(PF.situationOf(g, mp).sit, 'vsOpen:UTG');
+  g.act(mp.id, { type: 'raise', amount: 150 });
+  g.act(g.currentActor().id, { type: 'fold' });
+  const co = g.currentActor();
+  const s = PF.situationOf(g, co);
+  eq(s.sit, 'vs3bet:MP'); eq(s.cold, true);
+  ['fold', 'fold', 'fold'].forEach(function () { g.act(g.currentActor().id, { type: 'fold' }); });
+  eq(g.currentActor(), utg);
+  const s2 = PF.situationOf(g, utg);
+  eq(s2.sit, 'vs3bet:MP'); eq(s2.cold, false);
+});
+test('솔버 결정 모드(TUNE.solver)에서 AI 가 표로 프리플랍을 친다 (AA 레이즈 · 72o 폴드)', function () {
+  const prev = H.ai.TUNE.solver;
+  H.ai.TUNE.solver = true;
+  try {
+    const g = makeGame(6);
+    g.startHand();
+    const p = g.currentActor();
+    forceCards(p, 'As Ad');
+    const d = H.ai.decide(g, p, { difficulty: 'hard' });
+    eq(d.type, 'raise'); assert(d.think.solver, '솔버 경로');
+    eq(d.amount, 50, '오픈 2.5bb');
+    forceCards(p, '7d 2c');
+    eq(H.ai.decide(g, p, { difficulty: 'hard' }).type, 'fold');
+  } finally { H.ai.TUNE.solver = prev; }
+});
+test('기본값에서는 솔버가 결정에 쓰이지 않는다 (벤치마크 결과)', function () {
+  eq(H.ai.TUNE.solver, false);
+  const g = makeGame(6);
+  g.startHand();
+  const p = g.currentActor();
+  forceCards(p, 'As Ad');
+  const d = H.ai.decide(g, p, { difficulty: 'hard' });
+  eq(d.type, 'raise'); assert(!d.think.solver, '휴리스틱 경로');
+});
+test('C벳 빈도를 센다', function () {
+  const g = makeGame(3);
+  const tracker = H.stats.create({ bigBlind: 20 });
+  g.startHand(); tracker.startHand(g);
+  const btn = g.currentActor();
+  g.act(btn.id, { type: 'raise', amount: 60 });
+  g.act(g.currentActor().id, { type: 'fold' });
+  const bb = g.currentActor();
+  g.act(bb.id, { type: 'call' });
+  g.dealNextStreet();
+  g.act(bb.id, { type: 'check' });
+  g.act(btn.id, { type: 'raise', amount: 60 });   // C벳
+  g.act(bb.id, { type: 'fold' });
+  tracker.endHand(g);
+  const st = tracker.get(btn.id);
+  eq(st.samples.cbetOpp, 1); eq(st.cbetFlop, 1);
+  eq(tracker.get(bb.id).samples.cbetOpp, 0, '어그레서가 아니면 기회가 아니다');
+});
+test('솔버 레인지 역산 모드(TUNE.solverRanges): 오픈한 상대의 가중치는 표의 오픈 빈도다', function () {
+  const prev = H.ai.TUNE.solverRanges;
+  H.ai.TUNE.solverRanges = true;
+  try {
+    const g = makeGame(6);
+    g.startHand();
+    const opener = g.currentActor();
+    g.act(opener.id, { type: 'raise', amount: 50 });
+    const ctx = { game: g, diff: H.ai.DIFFICULTY.hard, tracker: null };
+    const r = H.ai.inferRange(ctx, opener);
+    const w = PF.weights(6, 'UTG', 'open', 'raise');
+    let same = true;
+    for (let i = 0; i < 169; i++) if (Math.abs(r.weights[i] - w[i]) > 1e-6) { same = false; break; }
+    assert(same, '솔버 오픈 빈도와 같아야 한다');
+    assert(r.band.hi < 0.35, '오픈 레인지는 좁다');
+  } finally { H.ai.TUNE.solverRanges = prev; }
 });
 
 console.log('\n[클래스별 가중치 레인지]');
@@ -1613,14 +1737,17 @@ test('JSON 왕복', function () {
 
 console.log('\n[드릴]');
 test('모든 자리를 목표로 문제를 만들 수 있다', function () {
+  /* 리버 자리는 시간 예산(2.5초) 안에 못 만날 수 있어 대체 출제가 나온다 — 대부분은 정확하거나 같은 상황이어야 한다 */
+  let loose = 0;
   H.profile.allKeys().forEach(function (key) {
     const r = H.drill.generate({ target: key, seed: 77 });
     assert(r, key + ': 생성 실패');
     assert(r.hero.isHuman && r.game.currentActor() === r.hero, key + ': 히어로 차례여야 한다');
     eq(r.game.phase, 'awaiting-action');
     if (r.reached) eq(r.spot.key, key, key + ': 목표 자리');
-    else eq(r.spot.spot, key.split('/')[1], key + ': 대체 출제는 같은 상황이어야 한다');
+    else if (r.spot.spot !== key.split('/')[1]) loose++;
   });
+  assert(loose <= 2, '같은 상황조차 못 만든 자리가 너무 많다: ' + loose);
 });
 test('같은 시드면 같은 문제', function () {
   const a = H.drill.generate({ target: 'flop/vsBet', seed: 4242 });

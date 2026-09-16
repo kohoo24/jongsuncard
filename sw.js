@@ -28,6 +28,8 @@ const SHELL = [
   './js/rng.js',
   './js/evaluator.js',
   './js/ranges.js',
+  './js/preflop-table.js',
+  './js/preflop.js',
   './js/equity.js',
   './js/stats.js',
   './js/tournament.js',

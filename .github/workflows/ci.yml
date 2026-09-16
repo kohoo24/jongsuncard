@@ -14,7 +14,7 @@ jobs:
         with:
           node-version: '22'
       - name: 린트
-        run: npx --yes eslint js sw.js test
+        run: npx --yes eslint js sw.js test tools
       - name: 단위 테스트
         run: npm test
 
