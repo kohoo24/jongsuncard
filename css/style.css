@@ -861,7 +861,17 @@ kbd {
 .felt.rect { border-radius: 26px; }
 .felt.short .seat.bot { display: flex; align-items: center; gap: 4px; width: auto; }
 .felt.short .seat.bot .cards { min-height: 0; margin: 0; flex: none; }
-.felt.short .seat.bot .plate { width: 100px; }
+/* 폰에서는 플레이트와 글자를 한 단계 줄인다 — 좌석 8개가 들어가야 하고, 큰 글자는 잘림의 원인이었다 */
+.felt.short .seat.bot .plate { width: 88px; padding: 4px 5px; gap: 4px; border-radius: 9px; }
+.felt.short .seat.bot .avatar { width: 20px; height: 20px; font-size: 12px; }
+.felt.short .seat.bot .clock-ring { width: 24px; height: 24px; left: 3px; -webkit-mask: radial-gradient(circle, transparent 8px, #000 9px); mask: radial-gradient(circle, transparent 8px, #000 9px); }
+.felt.short .seat.bot .name { font-size: 11px; }
+.felt.short .seat.bot .tag { font-size: 9px; }
+.felt.short .seat.bot .chips { font-size: 12px; }
+.felt.short .seat.bot .last { font-size: 10px; min-height: 12px; }
+.felt.short .seat.hero .plate { padding: 5px 7px; gap: 6px; }
+.felt.short .seat.hero .name { font-size: 12px; }
+.felt.short .seat.hero .chips { font-size: 13px; }
 .felt.short .seat.bot .card.small { width: 26px; height: 37px; }
 .felt.short .seat.bot .card.small .r { font-size: 10px; }
 .felt.short .seat.bot .card.small .s { font-size: 9px; }
@@ -878,13 +888,13 @@ kbd {
 /* 세로 7인 이상(밀집): 마지막 액션 줄을 숨기고 카드를 줄여 세 행 + 보드 + 히어로를 넣는다 */
 .felt.short.dense { --card-w: 32px; --card-h: 46px; }
 .felt.short.dense .seat.bot .last { display: none; }
-.felt.short.dense .seat.bot .plate { width: 92px; padding: 4px 6px; }
-.felt.short.dense .seat.bot .chips { font-size: 12px; }
-.felt.short.dense .seat.hero .plate { width: 112px; }
+.felt.short.dense .seat.bot .plate { width: 82px; }
+.felt.short.dense .seat.bot .chips { font-size: 11.5px; }
+.felt.short.dense .seat.hero .plate { width: 106px; }
 /* 히어로 압축: 카드를 플레이트 옆에 (가로는 항상, 세로는 공간이 모자랄 때) */
 .felt.short.hcompact .seat.hero { display: flex; align-items: center; gap: 6px; width: auto; }
 .felt.short.hcompact .seat.hero .cards { min-height: 0; margin: 0; flex: none; }
-.felt.short.hcompact .seat.hero .plate { width: 120px; }
+.felt.short.hcompact .seat.hero .plate { width: 112px; }
 /* 가로: 팟은 보드 옆에, 상단 좌석의 베팅 배지는 플레이트 옆에 */
 .felt.short.land { --card-w: 40px; --card-h: 56px; }
 .felt.short.land .seat.top .bet { bottom: auto; top: 50%; left: 100%; transform: translate(4px, -50%); }
