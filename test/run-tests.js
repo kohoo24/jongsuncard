@@ -843,6 +843,34 @@ test('포스트플랍 소프트 컷: 강한 콤보는 온전히, 약한 꼬리�
   assert(EQ.strengthWeight(0.45, 0.36) < 1 && EQ.strengthWeight(0.45, 0.36) > tail, '중간은 기울기 위');
   eq(EQ.strengthWeight(0.9, 1), 1, 'keepTop=1 이면 자르지 않는다');
 });
+test('양극 가중치: 벳 레인지의 약한 꼬리가 중간 핸드보다 무겁다 (U 자)', function () {
+  const mid = EQ.strengthWeight(0.50, 0.36, 0.45, 0.6), tail = EQ.strengthWeight(0.80, 0.36, 0.45, 0.6);
+  assert(tail > mid, '꼬리 ' + tail + ' > 중간 ' + mid);
+  eq(EQ.strengthWeight(0.10, 0.36, 0.45, 0.6), 1, '밸류는 그대로');
+  assert(EQ.strengthWeight(0.80, 0.36, 0, 0.6) < 0.15, '양극이 없으면 꼬리는 바닥값');
+  const h = hand('Qs Jd').map(C.code), b = hand('Ah 7c 2d').map(C.code);
+  const dist = EQ.boardDistribution(b, h);
+  const linear = EQ.buildCombos({ weights: RG.ACTION_WEIGHTS.any(), keepTop: 0.36 }, b, h, dist);
+  const polar = EQ.buildCombos({ weights: RG.ACTION_WEIGHTS.any(), keepTop: 0.36, polar: 0.45 }, b, h, dist);
+  assert(polar.meta.strongShare < linear.meta.strongShare, '양극 레인지는 강한 몫이 작다');
+});
+test('C벳은 양극으로, 콜은 선형으로 역산한다', function () {
+  const g = makeGame(3);
+  g.startHand();
+  const btn = g.currentActor();
+  g.act(btn.id, { type: 'raise', amount: 60 });
+  g.act(g.currentActor().id, { type: 'fold' });
+  const bb = g.currentActor();
+  g.act(bb.id, { type: 'call' });
+  g.dealNextStreet();
+  g.act(bb.id, { type: 'check' });
+  g.act(btn.id, { type: 'raise', amount: 60 });   // C벳
+  const ctx = { game: g, diff: H.ai.DIFFICULTY.hard, tracker: null };
+  const rBtn = H.ai.inferRange(ctx, btn);
+  assert(rBtn.polar === H.ai.TUNE.polarCbet && rBtn.polar > 0, 'C벳 양극 ' + rBtn.polar);
+  const rBb = H.ai.inferRange(ctx, bb);
+  eq(rBb.polar, 0, '콜한 사람은 양극이 아니다');
+});
 test('continueRange 는 남는 몫이 작을수록 강한 레인지가 된다', function () {
   const h = hand('Qs Jd').map(C.code), b = hand('Ah 7c 2d').map(C.code);
   const dist = EQ.boardDistribution(b, h);

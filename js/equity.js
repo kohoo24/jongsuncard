@@ -162,13 +162,17 @@
    * 자른다 — 하드 컷과 달리 약한 꼬리에 바닥값이 남아 블러프·플로트 몫이 된다.
    * 큰 벳(keepTop 작음)일수록 바닥이 낮다.
    */
-  function strengthWeight(s, keepTop) {
+  function strengthWeight(s, keepTop, polar, polarFrom) {
     if (keepTop >= 0.999) return 1;
     const hi = keepTop * 0.85, lo = keepTop * 1.5;
     const floor = Math.max(0.03, keepTop * 0.2);
-    if (s <= hi) return 1;
-    if (s >= lo) return floor;
-    return 1 - (1 - floor) * ((s - hi) / (lo - hi));
+    let w;
+    if (s <= hi) w = 1;
+    else if (s >= lo) w = floor;
+    else w = 1 - (1 - floor) * ((s - hi) / (lo - hi));
+    /* 양극화: 벳 레인지의 약한 꼬리(공기)는 중간 핸드보다 오히려 자주 벳한다 — U 자 모양 */
+    if (polar > 0 && s >= (polarFrom || 0.6)) w = Math.max(w, polar);
+    return w;
   }
 
   function classIndexOfCodes(a, b) {
@@ -224,6 +228,7 @@
 
     const weights = range.weights || R.weightsFromBand(range.band || { lo: 0, hi: 1 });
     const keepTop = range.keepTop == null ? 1 : range.keepTop;
+    const polar = range.polar || 0, polarFrom = range.polarFrom || 0.6;
     const boardLen = boardCodes.length;
     const useDist = !!dist && boardLen >= 3;
 
@@ -249,7 +254,7 @@
     /* 강도 가중 */
     const w = new Float32Array(wClass.length);
     for (let i = 0; i < w.length; i++) {
-      w[i] = useDist ? wClass[i] * strengthWeight(sList[i], keepTop) : wClass[i];
+      w[i] = useDist ? wClass[i] * strengthWeight(sList[i], keepTop, polar, polarFrom) : wClass[i];
     }
     let arr = quantize(pairArr, w, sArr, boardLen);
     if (arr.length >= 8 * 2) return arr;

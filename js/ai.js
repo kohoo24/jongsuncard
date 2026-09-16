@@ -72,6 +72,18 @@
     solver: false,           // 프리플랍 결정에 솔버 빈도를 쓴다 (보통·고급)
     solverRanges: false,     // 상대 레인지 역산에 솔버 빈도를 가중치로
     cbetAware: false,        // 어그레서의 플랍 첫 벳을 넓게 본다 — 단독 +9.0 → +4.5, 효과 없음
+    /* 벳 레인지 양극화: 벳은 밸류 + 공기(블러프)이고 중간 핸드는 체크한다. 진단: TAG 의 헤즈업
+       C벳은 상위 20% 가 59%, 공기(상위 45% 밖)가 41% 였는데 선형 레인지로 보면 콜당했을 때의
+       상대를 약하게 봐 중간 핸드로 레이즈해 -10.9bb/hand 를 잃었다. */
+    polarCbet: 0.45,         // 플랍 C벳(어그레서의 첫 벳) 꼬리 가중치 (4인 20시드 +3.0 → +4.2)
+    polarBet: 0,             // 그 밖의 벳 (0.3 이면 +2.1, 0.4 면 -3.7 — 쓰지 않는다)
+    polarRaise: 0,           // 레이즈
+    polarFrom: 0.60,         // 이 백분위(상위 %)부터 꼬리로 본다
+    /* 리버스 임플라이드 오즈: 플랍·턴에서 콜당하면 뒤 스트리트에서 더 잃는다. 진단: C벳에 중간
+       핸드로 레이즈해 강한 손에 콜당한 뒤 턴·리버에서 -15bb/hand. 콜당했을 때 지는 쪽의 비용에
+       (1 + rio) 를 곱한다. 리버는 0. */
+    rioRaise: 1.0,           // 레이즈가 콜당했을 때. 4인 20시드: 0 → +4.2, 0.6 → +6.5, 1.0 → +14.9
+    rioCall: 0,              // 콜/체크 뒤 (승률 실현율과 겹친다. 0.3 은 0.6 과 합쳐 +10.4)
     cbetKeep: 0.55,          // 그때 벳 레인지 폭의 하한 (프로파일 없을 때)
     cbetMinSamples: 12,      // 프로파일링으로 실제 C벳 빈도를 쓰기 위한 최소 기회 수
     lookahead: false,
@@ -251,7 +263,7 @@
     }
     const band = R.support(weights);
 
-    let keepTop = 1;
+    let keepTop = 1, polar = 0;
     if (ctx.diff.useRanges) {
       const acts = game.handActions;
       /* 프리플랍 어그레서의 플랍 첫 벳(C벳)은 사이즈가 말하는 것보다 넓다 — 많은 상대가 손과 무관하게
@@ -272,16 +284,18 @@
         if (act.type === 'raise') {
           const ratio = act.potBefore > 0 ? (act.amount - act.currentBetBefore) / act.potBefore : 1;
           let k = act.raisesBefore > 0 ? 0.20 : keepForRatio(ratio);
-          const isCbet = TUNE.cbetAware && act.street === 'flop' && !seenFlop && act.currentBetBefore === 0 && opp.id === pfrId;
-          if (isCbet) k = Math.max(k, cbetKeep);
+          const cbetSpot = act.street === 'flop' && !seenFlop && act.currentBetBefore === 0 && opp.id === pfrId;
+          if (TUNE.cbetAware && cbetSpot) k = Math.max(k, cbetKeep);
           keepTop = Math.min(keepTop, k);
+          polar = act.raisesBefore > 0 ? TUNE.polarRaise : cbetSpot ? TUNE.polarCbet : TUNE.polarBet;
         } else if (act.type === 'call') {
           keepTop = Math.min(keepTop, 0.62);
+          polar = 0;                       // 콜은 중간 핸드다 — 양극이 아니다
         }
         if (act.street === 'flop') seenFlop = true;
       }
     }
-    return { weights: weights, band: band, keepTop: keepTop, pos: pos, id: opp.id };
+    return { weights: weights, band: band, keepTop: keepTop, polar: polar, polarFrom: TUNE.polarFrom, pos: pos, id: opp.id };
   }
 
   /* ---------- 프리플랍 솔버 ---------- */
@@ -493,10 +507,11 @@
       lookPotMult = lookaheadMultiplier(ctx, holeCodes, boardCodes, combos, seed);
     }
     function futureEv(potAfter, cost) {
+      const rioC = (game.street === 'river' ? 0 : TUNE.rioCall) * cost * (1 - eq);
       const now = eq * potAfter * rz;
-      if (lookPotMult == null) return now - cost;
+      if (lookPotMult == null) return now - cost - rioC;
       const look = lookPotMult * potAfter;
-      return TUNE.lookBlend * look + (1 - TUNE.lookBlend) * now - cost;
+      return TUNE.lookBlend * look + (1 - TUNE.lookBlend) * now - cost - rioC;
     }
 
     const candidates = [];
@@ -561,8 +576,9 @@
         const callers = pCalled > 0
           ? Math.max(1, Math.min(ranges.length, expCallers / pCalled))
           : 1;
+        const rio = game.street === 'river' ? 0 : TUNE.rioRaise;
         const ev = pFoldAll * pot
-          + pCalled * (eqCalled * (pot + callers * theirCall) - (1 - eqCalled) * myCost);
+          + pCalled * (eqCalled * (pot + callers * theirCall) - (1 - eqCalled) * myCost * (1 + rio));
 
         candidates.push({
           type: 'raise', amount: target, ev: ev,
