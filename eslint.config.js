@@ -12,7 +12,7 @@ module.exports = [
         setInterval: 'readonly', clearInterval: 'readonly',
         requestAnimationFrame: 'readonly', performance: 'readonly',
         Worker: 'readonly', Blob: 'readonly', URL: 'readonly',
-        localStorage: 'readonly', caches: 'readonly', fetch: 'readonly',
+        localStorage: 'readonly', caches: 'readonly', fetch: 'readonly', Response: 'readonly',
         self: 'readonly', Promise: 'readonly', AudioContext: 'readonly',
         module: 'writable', require: 'readonly', process: 'readonly'
       }

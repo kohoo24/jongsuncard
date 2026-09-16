@@ -1,0 +1,57 @@
+name: Pages
+
+on:
+  push:
+    branches: ['main', 'claude/charming-bohr-tloqmv']
+  workflow_dispatch:
+
+# 배포는 한 번에 하나만. 밀린 건 최신 것만 남긴다.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 배포할 것만 추린다
+        run: |
+          mkdir -p site
+          cp index.html manifest.webmanifest icon.svg sw.js site/
+          cp -r css js fonts site/
+          # 서브경로(/jongsuncard/)에서도 돌아가도록 전부 상대경로여야 한다
+          if grep -rnE '(href|src)="/|url\("/' site/index.html site/css site/js; then
+            echo '::error::절대경로가 있다 — 서브경로 배포에서 깨진다'
+            exit 1
+          fi
+
+      - name: 캐시 이름에 빌드 스탬프를 박는다
+        run: |
+          # 이게 안 되면 예전 캐시가 영영 안 지워진다 — 조용히 넘어가지 않는다
+          sed -i "s/^const BUILD = 'dev';$/const BUILD = '${GITHUB_SHA}';/" site/sw.js
+          grep -q "const BUILD = '${GITHUB_SHA}';" site/sw.js \
+            || { echo '::error::sw.js 의 BUILD 를 바꾸지 못했다'; exit 1; }
+
+      - name: Jekyll 을 거치지 않게 한다
+        run: touch site/.nojekyll
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

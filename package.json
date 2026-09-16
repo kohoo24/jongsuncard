@@ -6,6 +6,7 @@
   "scripts": {
     "test": "node test/run-tests.js",
     "test:e2e": "node test/e2e.js",
+    "test:sw": "node test/sw.js",
     "lint": "eslint js sw.js test",
     "start": "python3 -m http.server 8000"
   },

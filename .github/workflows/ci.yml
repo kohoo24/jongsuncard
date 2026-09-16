@@ -29,3 +29,5 @@ jobs:
         run: npx --yes playwright@1.56.1 install --with-deps chromium
       - name: 브라우저 E2E
         run: npm run test:e2e
+      - name: 서비스 워커 갱신
+        run: npm run test:sw
