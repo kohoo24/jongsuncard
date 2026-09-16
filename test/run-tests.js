@@ -652,6 +652,41 @@ test('난이도가 높을수록 강하다 (normal vs easy, 800핸드)', function
   assert(normalBb > 10, 'normal 이 easy 를 이겨야 한다 (실제 ' + normalBb.toFixed(0) + 'bb/100)');
 });
 
+console.log('\n[TAG 벤치마크]');
+/*
+ * 고정 규칙 TAG 봇(test/tag-bot.js)을 자로 삼아 난이도별 bb/100 을 잰다.
+ * 시드가 고정이라 같은 카드로 같은 상대와 다시 재므로, AI 를 고치면 이 숫자가 움직인다.
+ * 하한은 "이전의 루즈-패시브 구현(-149bb/100)으로 되돌아가지 않는다" 를 지키는 선이다.
+ * 표본 오차는 600핸드에 약 ±20bb/100 이므로 hard 와 normal 의 우열은 여기서 가리지 않는다.
+ */
+const TAG = require('./tag-bot.js');
+const tagBench = {};
+test('hard 가 TAG 에게 크게 지지 않는다 (600핸드)', function () {
+  tagBench.hard = TAG.benchmark({ difficulty: 'hard', hands: 600, seed: 4242 }).bb100;
+  console.log('      (hard ' + (tagBench.hard >= 0 ? '+' : '') + tagBench.hard.toFixed(0) + 'bb/100 vs TAG)');
+  assert(tagBench.hard > -30, 'hard 가 TAG 에게 너무 진다 (실제 ' + tagBench.hard.toFixed(0) + 'bb/100)');
+});
+test('normal 이 TAG 에게 크게 지지 않는다 (600핸드)', function () {
+  tagBench.normal = TAG.benchmark({ difficulty: 'normal', hands: 600, seed: 4242 }).bb100;
+  console.log('      (normal ' + (tagBench.normal >= 0 ? '+' : '') + tagBench.normal.toFixed(0) + 'bb/100 vs TAG)');
+  assert(tagBench.normal > -45, 'normal 이 TAG 에게 너무 진다 (실제 ' + tagBench.normal.toFixed(0) + 'bb/100)');
+});
+test('easy 는 TAG 에게 확실히 진다 (200핸드)', function () {
+  tagBench.easy = TAG.benchmark({ difficulty: 'easy', hands: 200, seed: 4242 }).bb100;
+  console.log('      (easy ' + tagBench.easy.toFixed(0) + 'bb/100 vs TAG)');
+  assert(tagBench.easy < -80, 'easy 가 너무 강하다 — 초급의 의도적 실수가 사라졌나? (실제 ' + tagBench.easy.toFixed(0) + 'bb/100)');
+  assert(tagBench.easy < tagBench.normal - 60, 'easy 가 normal 과 구별되지 않는다');
+});
+test('TAG 봇 자체가 타이트-어그레시브다', function () {
+  const tr = TAG.benchmark({ difficulty: 'normal', hands: 200, seed: 99 }).tracker.all();
+  const tags = tr.filter(function (x) { return x.name.indexOf('tag') === 0; });
+  tags.forEach(function (t) {
+    assert(t.vpip > 0.12 && t.vpip < 0.30, 'TAG VPIP 가 범위 밖: ' + (t.vpip * 100).toFixed(0) + '%');
+    assert(t.vpip / Math.max(0.01, t.pfr) < 1.7, 'TAG 가 림프한다: VPIP/PFR ' + (t.vpip / t.pfr).toFixed(2));
+    assert(t.af > 1.3, 'TAG AF 가 낮다: ' + t.af.toFixed(2));
+  });
+});
+
 console.log('\n[통계 추적]');
 test('VPIP/PFR/폴드율을 정확히 센다', function () {
   const g = makeGame(4);
