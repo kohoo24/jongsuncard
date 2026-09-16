@@ -855,6 +855,10 @@ kbd {
  * "카드 위 · 플레이트 아래" 구조의 봇 좌석(95px)은 팟·보드와 부딪히므로 카드를 플레이트 옆에
  * 붙여 46px 로 압축하고, 좌석 행과 보드의 y 는 ui.js 가 실제 높이로 계산한다.
  */
+/* 낮은 펠트(계산 배치)에서는 타원 모서리가 상단·하단 행 양끝 좌석을 잘라 둥근 사각형으로 */
+.rail.rect { border-radius: 34px; }
+.rail.rect::after { border-radius: 30px; }
+.felt.rect { border-radius: 26px; }
 .felt.short .seat.bot { display: flex; align-items: center; gap: 4px; width: auto; }
 .felt.short .seat.bot .cards { min-height: 0; margin: 0; flex: none; }
 .felt.short .seat.bot .plate { width: 100px; }
@@ -885,6 +889,9 @@ kbd {
 .felt.short.land { --card-w: 40px; --card-h: 56px; }
 .felt.short.land .seat.top .bet { bottom: auto; top: 50%; left: 100%; transform: translate(4px, -50%); }
 .felt.short.land .seat.bottom .bet { top: auto; bottom: 50%; left: 100%; transform: translate(4px, 50%); }
+/* 오른쪽 절반의 좌석은 배지를 왼쪽(안쪽)에 — 맨 오른쪽 좌석의 배지가 펠트 밖으로 나가지 않게 */
+.felt.short.land .seat.top.right .bet { left: auto; right: 100%; transform: translate(-4px, -50%); }
+.felt.short.land .seat.bottom.right .bet { left: auto; right: 100%; transform: translate(-4px, 50%); }
 .felt.short.land .table-center { display: flex; align-items: center; justify-content: center; gap: 10px; width: auto; }
 .felt.short.land .pots { margin: 0; }
 .felt.short.land .street-label { display: none; }

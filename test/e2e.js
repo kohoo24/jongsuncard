@@ -607,7 +607,20 @@ async function playHands(page, target, opts) {
     };
     const pots = Array.prototype.map.call(document.querySelectorAll('.pot-badge'), r);
     const board = Array.prototype.map.call(document.querySelectorAll('#community .card'), r);
-    const felt = r(document.getElementById('felt'));
+    const feltEl = document.getElementById('felt');
+    const felt = r(feltEl);
+    /* 펠트는 overflow:hidden 이라 둥근 모서리 밖은 잘린다 — 플레이트 네 귀퉁이가 모서리 타원 안에 있어야 한다 */
+    const radius = getComputedStyle(feltEl).borderRadius.split('/');
+    const toPx = function (v, base) { v = v.trim(); return /%$/.test(v) ? parseFloat(v) / 100 * base : parseFloat(v); };
+    const rx = toPx(radius[0], felt.w), ry = toPx(radius[1] || radius[0], felt.h);
+    const clipped = function (rc) {
+      const corners = [[rc.l, rc.t], [rc.r, rc.t], [rc.l, rc.b], [rc.r, rc.b]];
+      return corners.some(function (c) {
+        const dx = Math.max(0, Math.max(felt.l + rx - c[0], c[0] - (felt.r - rx)));
+        const dy = Math.max(0, Math.max(felt.t + ry - c[1], c[1] - (felt.b - ry)));
+        return (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) > 1.02;
+      });
+    };
     const seats = Array.prototype.slice.call(document.querySelectorAll('.seat'));
     const bad = [];
     seats.forEach(function (s, i) {
@@ -622,10 +635,20 @@ async function playHands(page, target, opts) {
         if (oPot > 2) bad.push(name + '/' + el.className + ' 팟 ' + oPot);
         if (oBoard > 2) bad.push(name + '/' + el.className + ' 보드 ' + oBoard);
         if (el.classList.contains('plate') && (rc.t < felt.t - 1 || rc.b > felt.b + 1)) bad.push(name + ' 펠트 밖');
+        if (el.classList.contains('plate') && clipped(rc)) bad.push(name + ' 모서리에 잘림');
       });
-      seats.slice(i + 1).forEach(function (s2) {
-        const o = inter(r(s.querySelector('.plate')), r(s2.querySelector('.plate')));
-        if (o > 2) bad.push(name + ' x ' + s2.querySelector('.name').textContent.trim() + ' ' + o);
+      const myBet = s.querySelector('.bet');
+      seats.forEach(function (s2) {
+        if (s2 === s) return;
+        const n2 = s2.querySelector('.name').textContent.trim(), plate2 = r(s2.querySelector('.plate'));
+        if (s2 === seats[i + 1] || seats.indexOf(s2) > i) {
+          const o = inter(r(s.querySelector('.plate')), plate2);
+          if (o > 2) bad.push(name + ' x ' + n2 + ' ' + o);
+        }
+        if (myBet && !myBet.classList.contains('hidden')) {
+          const ob = inter(r(myBet), plate2);
+          if (ob > 3) bad.push(name + ' 배지 x ' + n2 + ' 플레이트 ' + ob);
+        }
       });
     });
     return bad;

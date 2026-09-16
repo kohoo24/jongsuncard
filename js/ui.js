@@ -217,16 +217,16 @@
     3: ['T30', 'T70'],
     4: ['T18', 'T50', 'T82'],
     5: ['B15', 'T28', 'T72', 'B85'],
-    6: ['B15', 'T16', 'T50', 'T84', 'B85'],
+    6: ['B15', 'T18', 'T50', 'T82', 'B85'],
     7: ['B15', 'U18', 'T30', 'T70', 'U82', 'B85'],
-    8: ['B15', 'U16', 'T16', 'T50', 'T84', 'U84', 'B85'],
-    9: ['B15', 'U15', 'T16', 'T50', 'U50', 'T84', 'U85', 'B85']
+    8: ['B15', 'U16', 'T18', 'T50', 'T82', 'U84', 'B85'],
+    9: ['B15', 'U15', 'T18', 'T50', 'U50', 'T82', 'U85', 'B85']
   };
   /* 가로(폭은 넉넉, 높이는 200px 남짓): 둘째 행(U)은 보드 양옆, 상단 행은 최대 4석 */
   const SHORT_SLOTS_LAND = {
     7: ['B15', 'U7', 'T30', 'T70', 'U93', 'B85'],
     8: ['B15', 'U7', 'T20', 'T50', 'T80', 'U93', 'B85'],
-    9: ['B15', 'U7', 'T15', 'T38', 'T62', 'T85', 'U93', 'B85']
+    9: ['B15', 'U7', 'T10', 'T36', 'T64', 'T90', 'U93', 'B85']   // 배지가 옆에 붙으므로 넓게 벌린다 (SE 가로 639px 기준)
   };
   /* 좁은 화면은 퍼센트 표가 520px 까지도 팟과 부딪히므로 계산 배치를 더 넓게 쓴다 */
   function shortMaxH() { return global.innerWidth < 720 ? 520 : 430; }
@@ -243,9 +243,14 @@
     const short = fh < shortMaxH() || (narrowScreen && n >= 7);
     const land = short && global.innerWidth > global.innerHeight;
     const dense = short && !land && n >= 7;   // 세로 7인 이상: 마지막 액션 줄 숨김 · 작은 카드
+    /* 계산 배치는 좌석 행이 펠트 맨 위·아래에 붙는데, 타원 모서리(반지름 40~46% / 26~32%)는 그 높이에서
+       폭이 절반뿐이라 양끝 좌석이 잘린다(9인 세로 화면 제보, 가로도 같다). 펠트와 레일을 둥근 사각형으로 */
+    const rect = short;
     felt.classList.toggle('short', short);
     felt.classList.toggle('land', land);
     felt.classList.toggle('dense', dense);
+    felt.classList.toggle('rect', rect);
+    if (felt.parentElement) felt.parentElement.classList.toggle('rect', rect);
     const center = felt.querySelector('.table-center');
     const heroEl = state.seatEls[state.seatOrder[0].id];
 
@@ -286,10 +291,12 @@
     const slots = (land && SHORT_SLOTS_LAND[n]) || SHORT_SLOTS[n] || SHORT_SLOTS[9];
     const topCy = margin + botBlock / 2;
     const hasRow2 = !land && slots.some(function (s) { return s[0] === 'U'; });
-    const row2Cy = topCy + botBlock + 4;
+    /* 상단 행의 베팅 배지는 플레이트 아래 22px 까지 내려오므로 둘째 행을 그만큼 띄운다. 그 대신
+       둘째 행 아래 배지 여백은 딱 맞게(26) 줄여 보드 위치는 그대로다 */
+    const row2Cy = topCy + botBlock + (hasRow2 ? 22 : 4);
     const lowestTop = hasRow2 ? row2Cy : topCy;
     /* 보드: 가장 낮은 상단 행(과 배지) 아래부터. 가로에서는 배지가 옆에 붙어 여백이 작다 */
-    const boardTop = lowestTop + botBlock / 2 + (land ? 6 : badge);
+    const boardTop = lowestTop + botBlock / 2 + (land ? 6 : (hasRow2 ? 26 : badge));
     const boardBottom = boardTop + (land ? cardH : potH + cardH + 4);   // 낮은 펠트에선 스트리트 라벨을 숨긴다
     const boardMidY = boardTop + (land ? cardH / 2 : potH + 5 + cardH / 2);
     /* 히어로: 카드가 보드에 닿을 만큼 낮으면 카드를 플레이트 옆으로 (가로는 항상) */
@@ -306,21 +313,25 @@
     state.seatOrder.forEach(function (p, i) {
       const e = state.seatEls[p.id], sp = state.seatPos[p.id];
       if (!e || !sp) return;
-      let x, cy, top;
-      if (i === 0) { x = 50; cy = heroCy; top = false; }
+      let x, cy, top, xPx;
+      if (i === 0) { x = 50; cy = heroCy; top = false; xPx = fw / 2; }
       else {
         const s = slots[i - 1] || 'T50';
         x = parseInt(s.slice(1), 10);
         if (s[0] === 'T') { cy = topCy; top = true; }
         else if (s[0] === 'U') { cy = land ? boardMidY : row2Cy; top = true; }
         else { cy = sideCy; top = false; }
+        /* 좁은 펠트에서 15% 는 플레이트 반폭보다 작아 밖으로 나간다 — 여백을 두고 안으로 민다.
+           맨 윗줄은 둥근 모서리(26px)에 걸리지 않게 조금 더 */
+        const half = e.root.offsetWidth / 2, pad = (s[0] === 'T') ? 10 : 4;
+        xPx = Math.min(Math.max(fw * x / 100, half + pad), fw - half - pad);
       }
-      e.root.style.left = x + '%';
+      e.root.style.left = xPx + 'px';
       e.root.style.top = cy + 'px';
       e.root.classList.toggle('top', top);
       e.root.classList.toggle('bottom', !top);
       e.root.classList.toggle('right', x > 50);
-      sp.x = x; sp.y = cy / fh * 100;
+      sp.x = xPx / fw * 100; sp.y = cy / fh * 100;
     });
   }
   function reducedMotion() {
