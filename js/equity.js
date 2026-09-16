@@ -289,6 +289,99 @@
     return out.length >= 8 * 2 ? out : combos;
   }
 
+  /* ---------- 룩어헤드: 다음 카드가 떨어진 뒤 내가 앞서는 비율 ---------- */
+  const aheadBuf = new Int32Array(7);
+  /**
+   * 다음 카드 next 가 깔린 보드에서, 상대 콤보 집합(가중) 중 내 핸드가 이기는 가중 비율.
+   * 동점은 절반. next 를 든 콤보는 뺀다. 비용을 위해 가중치 상위 maxCombos 개만 본다.
+   * @returns {number} 0~1, 콤보가 없으면 0.5
+   */
+  function aheadAfterCard(holeCodes, boardCodes, next, combos, maxCombos) {
+    const m = combos && combos.meta;
+    if (!m) return 0.5;
+    const boardLen = boardCodes.length;
+    aheadBuf[0] = holeCodes[0]; aheadBuf[1] = holeCodes[1];
+    for (let i = 0; i < boardLen; i++) aheadBuf[2 + i] = boardCodes[i];
+    aheadBuf[2 + boardLen] = next;
+    const heroV = K.evalCodes(aheadBuf, boardLen + 3);
+    const n = m.w.length;
+    let order = null;
+    if (maxCombos && n > maxCombos) {
+      order = [];
+      for (let i = 0; i < n; i++) if (m.w[i] > 0) order.push(i);
+      order.sort(function (a, b) { return m.w[b] - m.w[a]; });
+      order = order.slice(0, maxCombos);
+    }
+    let win = 0, mass = 0;
+    const count = order ? order.length : n;
+    for (let k = 0; k < count; k++) {
+      const i = order ? order[k] : k;
+      const w = m.w[i];
+      if (w <= 0) continue;
+      const a = m.pairs[i << 1], b = m.pairs[(i << 1) + 1];
+      if (a === next || b === next) continue;
+      aheadBuf[0] = a; aheadBuf[1] = b;
+      const v = K.evalCodes(aheadBuf, boardLen + 3);
+      mass += w;
+      if (v < heroV) win += w; else if (v === heroV) win += w * 0.5;
+    }
+    aheadBuf[0] = holeCodes[0]; aheadBuf[1] = holeCodes[1];
+    return mass > 0 ? win / mass : 0.5;
+  }
+
+  /**
+   * 다음 카드 뒤 상대 레인지를 "벳 레인지(강한 상위 betShare)" 와 "체크 레인지" 로 나누고,
+   * 각각을 상대로 내가 앞서는 비율을 돌려준다. 상대의 다음 스트리트 행동을 모델링하기 위해서다.
+   * @returns {{pBet:number, vsBet:number, vsCheck:number}}
+   */
+  const standTmp = [];
+  function standingAfterCard(holeCodes, boardCodes, next, combos, maxCombos, betShare) {
+    const m = combos && combos.meta;
+    if (!m) return { pBet: 0, vsBet: 0.5, vsCheck: 0.5 };
+    const boardLen = boardCodes.length;
+    aheadBuf[0] = holeCodes[0]; aheadBuf[1] = holeCodes[1];
+    for (let i = 0; i < boardLen; i++) aheadBuf[2 + i] = boardCodes[i];
+    aheadBuf[2 + boardLen] = next;
+    const heroV = K.evalCodes(aheadBuf, boardLen + 3);
+    const n = m.w.length;
+    let order = null;
+    if (maxCombos && n > maxCombos) {
+      order = [];
+      for (let i = 0; i < n; i++) if (m.w[i] > 0) order.push(i);
+      order.sort(function (a, b) { return m.w[b] - m.w[a]; });
+      order = order.slice(0, maxCombos);
+    }
+    standTmp.length = 0;
+    let mass = 0;
+    const count = order ? order.length : n;
+    for (let k = 0; k < count; k++) {
+      const i = order ? order[k] : k;
+      const w = m.w[i];
+      if (w <= 0) continue;
+      const a = m.pairs[i << 1], b = m.pairs[(i << 1) + 1];
+      if (a === next || b === next) continue;
+      aheadBuf[0] = a; aheadBuf[1] = b;
+      standTmp.push({ v: K.evalCodes(aheadBuf, boardLen + 3), w: w });
+      mass += w;
+    }
+    aheadBuf[0] = holeCodes[0]; aheadBuf[1] = holeCodes[1];
+    if (!mass) return { pBet: 0, vsBet: 0.5, vsCheck: 0.5 };
+    standTmp.sort(function (x, y) { return y.v - x.v; });   // 강한 순
+    const betMass = mass * betShare;
+    let acc = 0, betWin = 0, betTot = 0, chkWin = 0, chkTot = 0;
+    for (let i = 0; i < standTmp.length; i++) {
+      const e = standTmp[i];
+      const win = e.v < heroV ? e.w : e.v === heroV ? e.w * 0.5 : 0;
+      if (acc < betMass) { betWin += win; betTot += e.w; } else { chkWin += win; chkTot += e.w; }
+      acc += e.w;
+    }
+    return {
+      pBet: betTot / mass,
+      vsBet: betTot > 0 ? betWin / betTot : 0.5,
+      vsCheck: chkTot > 0 ? chkWin / chkTot : 0.5
+    };
+  }
+
   /* ---------- 동기 승률 계산 ---------- */
   function vsRanges(opts) {
     const holeCodes = opts.hole;
@@ -494,6 +587,8 @@
     buildCombos: buildCombos,
     continueRange: continueRange,
     strengthWeight: strengthWeight,
+    aheadAfterCard: aheadAfterCard,
+    standingAfterCard: standingAfterCard,
     vsRanges: vsRanges,
     vsRangesAsync: vsRangesAsync,
     foldProbability: foldProbability,

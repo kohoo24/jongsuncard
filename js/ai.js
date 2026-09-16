@@ -54,7 +54,29 @@
     likelyCallers: false,    // 콜당했을 때의 승률을 기대 콜러 수만큼의 상대로만 계산 (9인 -8: 채택 안 함)
     overcallTighten: 0.12,   // 오픈에 이미 콜러가 있을 때 콜러 한 명당 콜 기준 축소 비율
     noSqueezeBluff: false,   // 콜러가 있는 팟에는 블러프 3벳을 하지 않는다 (스퀴즈 블러프는 드물어 효과 없음)
-    multiwayClass: false     // 멀티웨이 콜 판단에서 수티드 커넥터·페어는 올리고 오프수트 브로드웨이는 내린다
+    multiwayClass: false,    // 멀티웨이 콜 판단에서 수티드 커넥터·페어는 올리고 오프수트 브로드웨이는 내린다 (나빠짐)
+    /*
+     * 멀티스트리트 룩어헤드: 플랍·턴의 체크/콜을 다음 카드 표본으로 평가한다.
+     * 기본 꺼짐 — TAG 벤치마크(4인 고급 10시드 × 1000핸드)에서 어느 형태도 한 스트리트 EV 를
+     * 넘지 못했다: 없음 +9.0 / v1(앞서는 비율 + 후속 정책) -5.3, 보수적 변형 +0.6~+9.2 /
+     * v2(상대의 벳·체크 레인지 모델링) +2.2~+7.2. 리뷰 판정과 결정 시간(1.3ms)은 문제없었다.
+     * 다음 시도는 레이즈 후보의 "콜당한 뒤" 가지에도 같은 모델을 적용해 일관성을 맞추는 것.
+     */
+    lookahead: false,
+    lookCards: 10,           // 표본 카드 수
+    lookCombos: 260,         // 상대별 볼 콤보 수 (가중치 상위)
+    lookBlend: 0.5,          // 룩어헤드 EV 와 한 스트리트 EV 의 혼합 비율
+    lookStrong: 0.65,        // 이 이상 앞서면 밸류를 뽑는다
+    lookWeak: 0.35,          // 이 이하면 체크-폴드 라인
+    lookExtract: 0.27,       // 밸류 추출 보너스 (팟 대비, 콜 확률 반영)
+    lookWeakRz: 0.5,         // 약할 때 쇼다운까지 가는 몫
+    lookMidRz: 0.75,         // 중간일 때
+    /* v2: 상대의 다음 스트리트 행동을 모델링한다 */
+    lookModel: 2,
+    lookBetShare: 0.33,      // 상대가 벳하는 몫 (새 보드에서 강한 상위)
+    lookBetSize: 0.6,        // 상대 벳 크기 (팟 대비)
+    lookPayoff: 0.4,         // 내가 벳했을 때 상대(체크 레인지)가 콜하는 비율
+    lookMultiway: 0.9        // 상대 한 명 추가될 때마다
   };
 
   /* 멀티웨이 팟용 핸드 가치 보정: 백분위 순위는 헤즈업 기준이라 상대가 많을수록 어긋난다 */
@@ -340,12 +362,30 @@
     const rz = game.street === 'river' ? 1
       : (inPos ? 0.90 : 0.80) * Math.pow(TUNE.multiwayRz, Math.max(0, ctx.opponents.length - 1));
 
+    /*
+     * 멀티스트리트 룩어헤드 (플랍·턴): 다음 카드 표본마다 "그 카드가 깔린 뒤 상대 콜 레인지보다
+     * 앞서는 비율" 을 실제로 평가하고, 그 비율에 따른 단순 후속 정책(강하면 밸류 추출, 약하면
+     * 체크-폴드, 중간이면 쇼다운 일부)으로 기대 팟을 매긴다. 드로우는 히트 카드에서만 앞서므로
+     * 임플라이드 오즈가, 중간 강도 핸드는 리버스 임플라이드 오즈가 자연히 생긴다.
+     * 한 스트리트 EV(고정 실현율)와 lookBlend 로 섞는다.
+     */
+    let lookPotMult = null;   // "지금 팟 1 당 앞으로 기대되는 몫"
+    if (TUNE.lookahead && (game.street === 'flop' || game.street === 'turn') && dist) {
+      lookPotMult = lookaheadMultiplier(ctx, holeCodes, boardCodes, combos, seed);
+    }
+    function futureEv(potAfter, cost) {
+      const now = eq * potAfter * rz;
+      if (lookPotMult == null) return now - cost;
+      const look = lookPotMult * potAfter;
+      return TUNE.lookBlend * look + (1 - TUNE.lookBlend) * now - cost;
+    }
+
     const candidates = [];
     if (a.canCheck) {
-      candidates.push({ type: 'check', ev: eq * pot * rz, tag: 'check' });
+      candidates.push({ type: 'check', ev: futureEv(pot, 0), tag: 'check' });
     } else {
       candidates.push({ type: 'fold', ev: 0, tag: 'fold' });
-      candidates.push({ type: 'call', amount: toCall, ev: eq * pot * rz - (1 - eq) * toCall, tag: 'call' });
+      candidates.push({ type: 'call', amount: toCall, ev: futureEv(pot + toCall, toCall), tag: 'call' });
     }
 
     if (a.canRaise) {
@@ -419,6 +459,64 @@
       dist: dist, inPosition: inPos, realization: rz,
       potOdds: toCall > 0 ? toCall / (pot + toCall) : 0
     };
+  }
+
+  /* 다음 카드 표본을 뽑아 "팟 1 당 기대 몫"을 돌려준다 */
+  function lookaheadMultiplier(ctx, holeCodes, boardCodes, combos, seed) {
+    const dead = new Uint8Array(52);
+    dead[holeCodes[0]] = 1; dead[holeCodes[1]] = 1;
+    for (let i = 0; i < boardCodes.length; i++) dead[boardCodes[i]] = 1;
+    const unseen = [];
+    for (let c = 0; c < 52; c++) if (!dead[c]) unseen.push(c);
+    /* 리뷰는 매번 같은 결과가 나와야 하므로 표본은 seed 에서 결정한다 */
+    let s = (seed + 0x9E3779B9) >>> 0;
+    function rnd() {
+      s = (s + 0x6D2B79F5) >>> 0;
+      let t = s;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+    const n = Math.min(TUNE.lookCards, unseen.length);
+    // 부분 셔플로 n 장
+    for (let i = 0; i < n; i++) {
+      const j = i + Math.floor(rnd() * (unseen.length - i));
+      const t = unseen[i]; unseen[i] = unseen[j]; unseen[j] = t;
+    }
+    let sum = 0;
+    const b = TUNE.lookBetSize;
+    for (let i = 0; i < n; i++) {
+      const card = unseen[i];
+      let v;
+      if (TUNE.lookModel === 2) {
+        /* 상대별로 "그 상대와 헤즈업" 가치를 구해 가장 위험한 상대(최소값)를 쓰고 멀티웨이 할인 */
+        v = Infinity;
+        for (let o = 0; o < combos.length; o++) {
+          const st = E.standingAfterCard(holeCodes, boardCodes, card, combos[o], TUNE.lookCombos, TUNE.lookBetShare);
+          // 상대가 벳: 콜할 가치가 있으면 콜 (팟 1 기준), 아니면 폴드 (0)
+          const callEv = st.vsBet * (1 + b) - (1 - st.vsBet) * b;
+          const betBranch = Math.max(0, callEv);
+          // 상대가 체크: 내가 앞서면 벳해서 일부 뽑고, 아니면 체크로 쇼다운
+          const chkBranch = st.vsCheck >= TUNE.lookStrong
+            ? st.vsCheck + (2 * st.vsCheck - 1) * b * TUNE.lookPayoff
+            : st.vsCheck;
+          const vo = st.pBet * betBranch + (1 - st.pBet) * chkBranch;
+          if (vo < v) v = vo;
+        }
+        if (!isFinite(v)) v = 0.5;
+        v *= Math.pow(TUNE.lookMultiway, Math.max(0, combos.length - 1));
+      } else {
+        let ahead = 1;
+        for (let o = 0; o < combos.length; o++) {
+          ahead *= E.aheadAfterCard(holeCodes, boardCodes, card, combos[o], TUNE.lookCombos);
+        }
+        if (ahead >= TUNE.lookStrong) v = ahead + (2 * ahead - 1) * TUNE.lookExtract;
+        else if (ahead <= TUNE.lookWeak) v = ahead * TUNE.lookWeakRz;
+        else v = ahead * TUNE.lookMidRz;
+      }
+      sum += v;
+    }
+    return sum / n;
   }
 
   function postflop(ctx) {
