@@ -24,6 +24,7 @@ const SHELL = [
   './js/cards.js',
   './js/cardart.js',
   './js/i18n.js',
+  './js/format.js',
   './js/rng.js',
   './js/evaluator.js',
   './js/ranges.js',

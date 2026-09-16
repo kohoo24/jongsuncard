@@ -407,6 +407,52 @@ async function playHands(page, target, opts) {
     }
   }
 
+  console.log('\n[bb 단위 표시]');
+  await waitHeroTurn(page, 'E2E005');
+  await page.click('#btnUnit');
+  await page.waitForTimeout(200);
+  const bbView = await page.evaluate(function () {
+    const g = window.HoldemUI.game, h = g.byId(0);
+    const a = g.actionsFor(h);
+    return {
+      pressed: document.getElementById('btnUnit').getAttribute('aria-pressed'),
+      pot: document.getElementById('pots').textContent,
+      call: document.getElementById('btnCall').textContent,
+      raise: document.getElementById('btnRaise').textContent,
+      chips: document.querySelector('.seat .chips') ? document.querySelector('.seat .chips').textContent : '',
+      lastActs: Array.prototype.map.call(document.querySelectorAll('.seat .last'), function (e) { return e.textContent; }).filter(function (t) { return /\d/.test(t); }),
+      input: document.getElementById('raiseInput').value,
+      raiseTo: window.HoldemUI.raiseTo, bb: g.bigBlind, canRaise: a.canRaise, canCheck: a.canCheck,
+      unitShown: !document.getElementById('raiseUnit').classList.contains('hidden'),
+      setting: JSON.parse(localStorage.getItem('holdem.settings')).unit
+    };
+  });
+  check('토글하면 팟·칩·버튼이 bb 로 바뀐다',
+    bbView.pressed === 'true' && /bb/.test(bbView.pot) && /bb/.test(bbView.chips) && (bbView.canCheck || /bb/.test(bbView.call)),
+    JSON.stringify(bbView));
+  check('입력칸도 bb 로 보인다', !bbView.canRaise || (bbView.unitShown && parseFloat(bbView.input) * bbView.bb === bbView.raiseTo), JSON.stringify(bbView));
+  check('설정에 저장된다', bbView.setting === 'bb');
+  check('좌석의 마지막 액션 금액도 bb 다', bbView.lastActs.every(function (t) { return /bb/.test(t); }), JSON.stringify(bbView.lastActs));
+  if (bbView.canRaise) {
+    await page.fill('#raiseInput', '7.5');
+    const typedBb = await page.evaluate(function () { return window.HoldemUI.raiseTo; });
+    const expectBb = await page.evaluate(function () {
+      const g = window.HoldemUI.game, a = g.actionsFor(g.byId(0));
+      return Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, 7.5 * g.bigBlind));
+    });
+    check('bb 로 입력하면 칩으로 환산된다', typedBb === expectBb, typedBb + ' (기대 ' + expectBb + ')');
+  }
+  await page.click('.tab[data-tab="log"]');
+  await page.waitForTimeout(150);
+  const logBb = await page.evaluate(function () { return document.querySelector('.loglist').textContent; });
+  check('과거 로그도 bb 로 바뀐다', /bb/.test(logBb), logBb.slice(0, 80));
+  await page.click('#btnUnit');
+  await page.waitForTimeout(200);
+  const chipView = await page.evaluate(function () {
+    return { pressed: document.getElementById('btnUnit').getAttribute('aria-pressed'), pot: document.getElementById('pots').textContent };
+  });
+  check('다시 누르면 칩으로 돌아온다', chipView.pressed === 'false' && !/bb/.test(chipView.pot), JSON.stringify(chipView));
+
   console.log('\n[약점 프로파일과 드릴]');
   /* 히어로는 무작위로 플레이하므로 여기까지 오는 동안 파산했을 수 있다 — 그러면 새 판을 연다.
      프로파일은 localStorage 에 남아 있으므로 학습 탭 검사에는 영향이 없다. */

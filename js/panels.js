@@ -34,7 +34,7 @@
     m.appendChild(icon);
     return m;
   }
-  function num(v) { return Math.round(v).toLocaleString(); }
+  function num(v) { return H.format.amount(v); }
 
   H.panels = { SERIES: SERIES };
 
@@ -211,6 +211,7 @@
       return n;
     }
     function fmt(v) {
+      if (H.format.unit() === 'bb') return H.format.amount(v);
       return v >= 10000 ? (v / 1000).toFixed(0) + 'k'
         : v >= 1000 ? (v / 1000).toFixed(1) + 'k' : String(Math.round(v));
     }
@@ -570,7 +571,7 @@
       const isBest = same(c, item.best);
       const isMine = same(c, item.chosen);
       const chip = el('span', 'drill-cand' + (isBest ? ' best' : '') + (isMine ? ' mine' : ''),
-        H.review.actionLabel(c) + ' · ' + (c.ev >= 0 ? '+' : '') + Math.round(c.ev));
+        H.review.actionLabel(c) + ' · ' + (c.ev >= 0 ? '+' : '') + num(c.ev));
       cands.appendChild(chip);
     });
     host.appendChild(cands);

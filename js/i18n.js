@@ -129,6 +129,10 @@
     'ctl.presetsRaise': ['레이즈 사이즈 (상대 벳 배수)', 'Raise size (× their bet)'],
     'ctl.presetsPot': ['팟 대비 벳 사이즈', 'Bet size (% of pot)'],
     'setup.chipsBb': ['{chips} ({bb}bb)', '{chips} ({bb}bb)'],
+    'setup.unitBb': ['금액을 bb 로 표시', 'Show amounts in big blinds'],
+    'top.unitChips': ['칩', 'Chips'],
+    'top.unitBb': ['bb', 'bb'],
+    'top.unitTitle': ['금액 단위 전환 (칩 / bb)', 'Toggle amount unit (chips / bb)'],
     'ctl.showCards': ['카드 공개', 'Show cards'],
     'ctl.muckCards': ['머크', 'Muck'],
     'ctl.equity': ['예상 승률 {pct}%', 'Equity {pct}%'],
@@ -363,7 +367,11 @@
     if (str == null) str = row ? row[0] : key;
     if (params) {
       str = str.replace(/\{(\w+)\}/g, function (m, k) {
-        return params[k] != null ? params[k] : '';
+        const v = params[k];
+        if (v == null) return '';
+        /* 숫자 금액은 표시 단위(칩/bb)를 따른다 — 로그처럼 나중에 렌더링되는 문자열도 함께 바뀐다 */
+        if (k === 'amount' && typeof v === 'number' && H.format) return H.format.amount(v);
+        return v;
       });
     }
     return str;

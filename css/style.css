@@ -711,6 +711,9 @@ kbd {
 
 .raise-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 #raiseSlider { flex: 1 1 160px; min-width: 140px; accent-color: var(--gold); height: 24px; }
+.raise-input-wrap { position: relative; flex: none; display: inline-flex; align-items: center; }
+.raise-unit { position: absolute; right: 9px; font-size: 11px; color: var(--muted); pointer-events: none; }
+.raise-input-wrap.bb #raiseInput { padding-right: 28px; }
 #raiseInput {
   width: 96px; flex: none;
   background: rgba(255, 255, 255, .06); border: 1px solid var(--line); color: var(--text);
@@ -719,6 +722,8 @@ kbd {
 }
 #raiseInput::-webkit-outer-spin-button, #raiseInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 #raiseInput:focus { outline: 1px solid var(--gold); }
+#btnUnit { font-weight: 700; min-width: 40px; }
+#btnUnit[aria-pressed="true"] { color: var(--gold); border-color: var(--gold); }
 .presets { display: flex; gap: 5px; flex-wrap: wrap; }
 .presets button {
   background: rgba(255, 255, 255, .06);

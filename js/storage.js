@@ -49,6 +49,7 @@
     showThinking: false,
     autoReview: true,
     fourColor: false,
+    unit: 'chips',         // 'chips' | 'bb'
     sound: true,
     seed: ''
   };

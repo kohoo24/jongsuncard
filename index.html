@@ -18,6 +18,7 @@
     <div class="brand"><span class="pip">&spades;</span> <span data-i18n="app.title">텍사스 홀덤</span></div>
     <div class="meta" id="topMeta"></div>
     <div class="topbtns">
+      <button class="ghost" id="btnUnit" aria-pressed="false" title="금액 단위 전환">bb</button>
       <button class="ghost" id="btnSound" aria-pressed="true" title="소리">&#128266;</button>
       <button class="ghost" id="btnPanel" aria-expanded="true" data-i18n="top.log">기록</button>
       <button class="ghost" id="btnMenu" data-i18n="top.newGame">새 게임</button>
@@ -65,7 +66,7 @@
 
       <div class="raise-row" id="raiseRow">
         <input type="range" id="raiseSlider" aria-label="레이즈 금액">
-        <input type="number" id="raiseInput" inputmode="numeric" pattern="[0-9]*" aria-label="레이즈 금액 직접 입력" min="0" step="1">
+        <label class="raise-input-wrap"><input type="number" id="raiseInput" inputmode="decimal" aria-label="레이즈 금액 직접 입력" min="0" step="any"><span id="raiseUnit" class="raise-unit hidden">bb</span></label>
         <div class="presets" id="presets" role="group" aria-label="스마트 벳"></div>
       </div>
 
@@ -129,6 +130,7 @@
       <label class="field check"><input type="checkbox" id="optThinking"><span data-i18n="setup.showThinking"></span></label>
       <label class="field check"><input type="checkbox" id="optReview"><span data-i18n="setup.autoReview"></span></label>
       <label class="field check"><input type="checkbox" id="optFourColor"><span data-i18n="setup.fourColor"></span></label>
+      <label class="field check"><input type="checkbox" id="optUnitBb"><span data-i18n="setup.unitBb"></span></label>
       <label class="field check"><input type="checkbox" id="optRebuy"><span data-i18n="setup.rebuy"></span></label>
     </div>
 
@@ -170,6 +172,7 @@
 <script src="js/cards.js"></script>
 <script src="js/cardart.js"></script>
 <script src="js/i18n.js"></script>
+<script src="js/format.js"></script>
 <script src="js/rng.js"></script>
 <script src="js/evaluator.js"></script>
 <script src="js/ranges.js"></script>

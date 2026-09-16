@@ -9,7 +9,7 @@
  */
 (function (global) {
   const H = global.Holdem || (global.Holdem = {});
-  if (typeof require === 'function') { require('./ai.js'); require('./i18n.js'); }
+  if (typeof require === 'function') { require('./ai.js'); require('./i18n.js'); require('./format.js'); }
   const T = function (k, p) { return H.i18n.t(k, p); };
 
   /* EV 손실(빅블라인드 단위) -> 판정 */
@@ -68,8 +68,8 @@
     if (!c) return '?';
     if (c.type === 'fold') return T('act.fold');
     if (c.type === 'check') return T('act.check');
-    if (c.type === 'call') return T('act.call') + ' ' + (c.amount || 0).toLocaleString();
-    return T('act.raise') + ' ' + (c.amount || 0).toLocaleString();
+    if (c.type === 'call') return T('act.call') + ' ' + H.format.amount(c.amount || 0);
+    return T('act.raise') + ' ' + H.format.amount(c.amount || 0);
   }
 
   /**
@@ -184,7 +184,7 @@
       items: items,
       text: total < 0.15 * bb
         ? T('review.evNone')
-        : T('review.evLoss', { amount: '-' + Math.round(total).toLocaleString() })
+        : T('review.evLoss', { amount: '-' + H.format.amount(total) })
     };
   }
 

@@ -41,6 +41,7 @@
     this.mucked = false;
     this.lastAction = '';
     this.lastActionKey = '';
+    this.lastActionAmount = 0;   // 화면이 표시 단위(칩/bb)로 다시 조합할 수 있도록 금액은 따로 둔다
     this.handResult = null;
     this.won = 0;
     this.rebuys = 0;
@@ -302,7 +303,7 @@
       const p = this.players[i];
       p.cards = []; p.bet = 0; p.totalBet = 0;
       p.folded = false; p.allIn = false; p.acted = false; p.raiseClosed = false; p.mucked = false;
-      p.lastAction = ''; p.lastActionKey = ''; p.handResult = null; p.won = 0;
+      p.lastAction = ''; p.lastActionKey = ''; p.lastActionAmount = 0; p.handResult = null; p.won = 0;
       p.bustStack = p.chips;
     }
 
@@ -421,12 +422,12 @@
 
     if (type === 'fold') {
       p.folded = true; p.acted = true;
-      p.lastActionKey = 'act.fold'; p.lastAction = T('act.fold');
+      p.lastActionKey = 'act.fold'; p.lastAction = T('act.fold'); p.lastActionAmount = 0;
       this.say('log.fold', { name: p.name }, 'fold');
     } else if (type === 'check') {
       if (!a.canCheck) return { ok: false, error: 'cannot-check' };
       p.acted = true;
-      p.lastActionKey = 'act.check'; p.lastAction = T('act.check');
+      p.lastActionKey = 'act.check'; p.lastAction = T('act.check'); p.lastActionAmount = 0;
       this.say('log.check', { name: p.name }, 'check');
     } else if (type === 'call') {
       if (a.toCall <= 0) return this.act(playerId, { type: 'check' });
@@ -434,6 +435,7 @@
       p.acted = true;
       p.lastActionKey = 'act.call';
       p.lastAction = T('act.call') + ' ' + paid;
+      p.lastActionAmount = paid;
       this.say(p.allIn ? 'log.callAllIn' : 'log.call', { name: p.name, amount: paid }, 'call');
     } else if (type === 'raise' || type === 'bet' || type === 'allin') {
       if (!a.canRaise) return { ok: false, error: 'cannot-raise' };
@@ -467,6 +469,7 @@
       const isBet = prevBet === 0;
       p.lastActionKey = p.allIn ? 'act.allin' : (isBet ? 'act.bet' : 'act.raise');
       p.lastAction = T(p.lastActionKey) + ' ' + p.bet;
+      p.lastActionAmount = p.bet;
       this.say(p.allIn ? 'log.betAllIn' : (isBet ? 'log.bet' : 'log.raise'),
         { name: p.name, amount: p.bet }, 'raise');
     } else {
@@ -817,7 +820,7 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
           cards: cardsOut(p.cards),
           bet: p.bet, totalBet: p.totalBet,
           folded: p.folded, allIn: p.allIn, acted: p.acted, raiseClosed: !!p.raiseClosed, mucked: p.mucked,
-          lastActionKey: p.lastActionKey, won: p.won, rebuys: p.rebuys,
+          lastActionKey: p.lastActionKey, lastActionAmount: p.lastActionAmount || 0, won: p.won, rebuys: p.rebuys,
           timeBankLeft: p.timeBankLeft, bustStack: p.bustStack
         };
       })
@@ -870,7 +873,8 @@ if (typeof module !== 'undefined' && module.exports) module.exports = globalThis
       p.bet = s.bet; p.totalBet = s.totalBet;
       p.folded = s.folded; p.allIn = s.allIn; p.acted = s.acted; p.raiseClosed = !!s.raiseClosed; p.mucked = s.mucked;
       p.lastActionKey = s.lastActionKey || '';
-      p.lastAction = p.lastActionKey ? H.i18n.t(p.lastActionKey) : '';
+      p.lastActionAmount = s.lastActionAmount || 0;
+      p.lastAction = p.lastActionKey ? H.i18n.t(p.lastActionKey) + (p.lastActionAmount ? ' ' + p.lastActionAmount : '') : '';
       p.won = s.won; p.rebuys = s.rebuys || 0;
       p.timeBankLeft = s.timeBankLeft || 0;
       p.bustStack = s.bustStack || s.chips;

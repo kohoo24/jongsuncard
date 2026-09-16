@@ -11,6 +11,7 @@ require('../js/tournament.js');
 require('../js/review.js');
 require('../js/history.js');
 require('../js/i18n.js');
+require('../js/format.js');
 const C = H.cards;
 
 let passed = 0, failed = 0;
@@ -457,6 +458,46 @@ test('언어 전환이 핸드 설명에 반영된다', function () {
   eq(H.eval.describe(h), 'Royal Flush');
   H.i18n.setLang('ko');
   eq(H.eval.describe(h), '로열 플러시');
+});
+
+console.log('\n[금액 단위 (칩 / bb)]');
+test('칩 모드는 정수, bb 모드는 빅블라인드로 나눈다', function () {
+  H.format.setBigBlind(20);
+  H.format.setUnit('chips');
+  eq(H.format.amount(1250), '1,250');
+  H.format.setUnit('bb');
+  eq(H.format.amount(1250), '62.5bb');
+  eq(H.format.amount(60), '3bb');
+  eq(H.format.amount(5), '0.25bb');
+  eq(H.format.amount(2000), '100bb');
+  eq(H.format.amount(4321), '216bb', '100bb 이상은 정수');
+  eq(H.format.amount(-30), '-1.5bb');
+  H.format.setUnit('chips');
+});
+test('입력칸은 표시 단위로 읽고 쓴다', function () {
+  H.format.setBigBlind(20);
+  H.format.setUnit('bb');
+  eq(H.format.toInput(470), '23.5');
+  eq(H.format.fromInput('23.5'), 470);
+  eq(H.format.fromInput('2.25bb'), 45);
+  H.format.setUnit('chips');
+  eq(H.format.toInput(470), '470');
+  eq(H.format.fromInput('470'), 470);
+  assert(isNaN(H.format.fromInput('abc')));
+});
+test('i18n 의 amount 파라미터는 단위를 따른다 (과거 로그도 함께 바뀐다)', function () {
+  H.format.setBigBlind(20);
+  const g = new H.Game({ smallBlind: 10, bigBlind: 20, rng: H.rng.create(1) });
+  for (let i = 0; i < 2; i++) g.addPlayer({ id: i, name: 'P' + i, chips: 1000 });
+  g.startHand();
+  g.act(g.currentActor().id, { type: 'raise', amount: 60 });
+  const entry = g.log[g.log.length - 1];
+  H.format.setUnit('chips');
+  assert(entry.text.indexOf('60') >= 0, entry.text);
+  H.format.setUnit('bb');
+  assert(entry.text.indexOf('3bb') >= 0, entry.text);
+  eq(H.review.actionLabel({ type: 'raise', amount: 60 }).indexOf('3bb') >= 0, true);
+  H.format.setUnit('chips');
 });
 
 console.log('\n[프리플랍 레인지]');

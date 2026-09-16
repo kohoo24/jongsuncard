@@ -127,7 +127,7 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m];
     });
   }
-  function num(v) { return Math.round(v).toLocaleString(); }
+  function num(v) { return H.format.amount(v); }
 
   /* ==================== 좌석 ==================== */
   function buildSeats() {
@@ -431,7 +431,9 @@
       e.chips.textContent = num(p.chips);
 
       if (p.allIn && !p.folded) e.last.innerHTML = '<span class="allin">' + T('table.allIn') + '</span>';
-      else e.last.textContent = p.lastActionKey ? p.lastAction : '';
+      else e.last.textContent = p.lastActionKey
+        ? T(p.lastActionKey) + (p.lastActionAmount ? ' ' + num(p.lastActionAmount) : '')
+        : '';
 
       const isTurn = actor === p && g.phase === 'awaiting-action';
       const face = faceFor(g, p, isTurn);
@@ -747,8 +749,8 @@
       }
       slider.disabled = false;
       $('raiseInput').disabled = false;
-      $('raiseInput').min = a.minRaiseTo;
-      $('raiseInput').max = a.maxRaiseTo;
+      $('raiseInput').min = H.format.toInput(a.minRaiseTo);
+      $('raiseInput').max = H.format.toInput(a.maxRaiseTo);
       $('raiseInput').placeholder = T('ctl.amount');
       renderPresets(g, a);
     } else {
@@ -850,8 +852,31 @@
     v = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, Math.round(v)));
     state.raiseTo = v;
     $('raiseSlider').value = v;
-    if (document.activeElement !== $('raiseInput')) $('raiseInput').value = v;
+    if (document.activeElement !== $('raiseInput')) $('raiseInput').value = H.format.toInput(v);
     return v;
+  }
+
+  function applyUnitUi() {
+    const bb = H.format.unit() === 'bb';
+    $('btnUnit').textContent = bb ? T('top.unitBb') : T('top.unitChips');
+    $('btnUnit').setAttribute('aria-pressed', String(bb));
+    $('btnUnit').title = T('top.unitTitle');
+    hide($('raiseUnit'), !bb);
+    $('raiseInput').parentNode.classList.toggle('bb', bb);
+    $('raiseInput').step = bb ? '0.5' : '1';
+  }
+
+  function toggleUnit() {
+    state.settings.unit = H.format.unit() === 'bb' ? 'chips' : 'bb';
+    H.format.setUnit(state.settings.unit);
+    H.storage.saveSettings(state.settings);
+    applyUnitUi();
+    if (state.game) {
+      state.seatEls = {};
+      buildSeats();           // 칩 텍스트가 캐시된 서명으로 걸러지지 않도록 다시 그린다
+      $('raiseInput').value = H.format.toInput(state.raiseTo);
+      render();
+    }
   }
 
   function updateRaiseLabel() {
@@ -970,6 +995,7 @@
 
   /* ==================== 렌더 ==================== */
   function render() {
+    if (state.game) H.format.setBigBlind(state.game.bigBlind);
     updateSeats();
     updateBoard();
     updateHeroReadout();
@@ -1416,6 +1442,7 @@
     $('optThinking').checked = s.showThinking;
     $('optReview').checked = s.autoReview;
     $('optFourColor').checked = s.fourColor;
+    $('optUnitBb').checked = s.unit === 'bb';
     $('optRebuy').checked = s.allowRebuy;
     applyI18nText();
     $('btnResume').hidden = !H.storage.loadSession();
@@ -1450,6 +1477,7 @@
       showThinking: $('optThinking').checked,
       autoReview: $('optReview').checked,
       fourColor: $('optFourColor').checked,
+      unit: $('optUnitBb').checked ? 'bb' : 'chips',
       allowRebuy: $('optRebuy').checked,
       sound: state.sound
     };
@@ -1467,6 +1495,8 @@
     state.sound = s.sound !== false;
     H.i18n.setLang(s.lang);
     $('app').dataset.fourColor = String(!!s.fourColor);
+    H.format.setUnit(s.unit);
+    applyUnitUi();
     $('btnSound').textContent = state.sound ? '🔊' : '🔇';
     $('btnSound').setAttribute('aria-pressed', String(state.sound));
     H.storage.saveSettings(s);
@@ -1601,6 +1631,7 @@
       $('btnPanel').setAttribute('aria-expanded', String(!p.classList.contains('hidden')));
       refreshPanel();
     });
+    $('btnUnit').addEventListener('click', toggleUnit);
     $('btnSound').addEventListener('click', function () {
       state.sound = !state.sound;
       state.settings.sound = state.sound;
@@ -1623,7 +1654,7 @@
     });
     $('raiseSlider').addEventListener('input', function () {
       state.raiseTo = parseInt($('raiseSlider').value, 10) || 0;
-      $('raiseInput').value = state.raiseTo;
+      $('raiseInput').value = H.format.toInput(state.raiseTo);
       updateRaiseLabel();
     });
     /* 직접 입력: 치는 동안은 그대로 두고, 확정(변경·Enter)할 때 범위로 보정한다 */
@@ -1631,7 +1662,7 @@
       const g = state.game, hero = g && g.byId(HERO_ID);
       if (!hero) return;
       const a = g.actionsFor(hero);
-      const v = parseInt($('raiseInput').value, 10);
+      const v = H.format.fromInput($('raiseInput').value);
       if (!isFinite(v)) return;
       state.raiseTo = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, v));
       $('raiseSlider').value = state.raiseTo;
@@ -1641,9 +1672,9 @@
       const g = state.game, hero = g && g.byId(HERO_ID);
       if (!hero) return;
       const a = g.actionsFor(hero);
-      const v = parseInt($('raiseInput').value, 10);
+      const v = H.format.fromInput($('raiseInput').value);
       setRaiseTo(g, a, isFinite(v) ? v : a.minRaiseTo, true);
-      $('raiseInput').value = state.raiseTo;
+      $('raiseInput').value = H.format.toInput(state.raiseTo);
       updateRaiseLabel();
     }
     $('raiseInput').addEventListener('change', commitRaiseInput);
@@ -1728,6 +1759,7 @@
     state.settings = H.storage.loadSettings();
     state.profile = H.profile.load();
     state.sound = state.settings.sound !== false;
+    H.format.setUnit(state.settings.unit);
     H.i18n.setLang(state.settings.lang);
     bind();
     if (global.innerWidth < 980) $('sidePanel').classList.add('hidden');
