@@ -593,8 +593,8 @@ test('봇 통계가 현실적인 범위에 들어온다', function () {
   const tracker = H.stats.create({ bigBlind: BB });
   for (let h = 0; h < 300; h++) {
     g.players.forEach(function (p) { p.chips = BB * 100; });
-    tracker.startHand(g);
     g.startHand();
+    tracker.startHand(g);
     let guard = 0;
     while (g.phase !== 'hand-over' && g.phase !== 'game-over' && guard++ < 300) {
       if (g.phase === 'awaiting-action') {
@@ -634,8 +634,8 @@ test('난이도가 높을수록 강하다 (normal vs easy, 800핸드)', function
   const hands = 800;
   for (let h = 0; h < hands; h++) {
     g.players.forEach(function (p) { p.chips = START; });
-    tracker.startHand(g);
     g.startHand();
+    tracker.startHand(g);
     let guard = 0;
     while (g.phase !== 'hand-over' && g.phase !== 'game-over' && guard++ < 300) {
       if (g.phase === 'awaiting-action') {
@@ -656,8 +656,8 @@ console.log('\n[통계 추적]');
 test('VPIP/PFR/폴드율을 정확히 센다', function () {
   const g = makeGame(4);
   const tr = H.stats.create({ bigBlind: 20 });
-  tr.startHand(g);
   g.startHand();
+  tr.startHand(g);
   const first = g.currentActor();
   g.act(first.id, { type: 'raise', amount: 60 });     // PFR + VPIP
   const second = g.currentActor();
@@ -690,6 +690,64 @@ test('프리플랍/포스트플랍 폴드율을 분리한다', function () {
   assert(Math.abs(s.foldToBetPre - 0.875) < 0.001);
   assert(Math.abs(s.foldToBetPost - 0.3333) < 0.001);
   assert(s.foldToBetPre > s.foldToBetPost, '두 값이 확실히 구분되어야 한다');
+});
+test('손익이 제로섬이고 실제 스택 변화와 맞는다', function () {
+  /*
+   * 예전에는 트래커를 g.startHand() 앞에서 불러서, chipsStart 가
+   * '지금 칩 + 지난 핸드에 넣은 돈' 이 됐다. 그러면 매 핸드 손익이 지난 핸드의
+   * 투자만큼 깎여, 모두가 지는(bb/100 이 전원 마이너스) 표가 나왔다.
+   */
+  const BB = 20, START = BB * 100;
+  const g = new H.Game({ smallBlind: BB / 2, bigBlind: BB, rng: H.rng.create(4242) });
+  for (let i = 0; i < 4; i++) {
+    g.addPlayer({ id: i, name: 'P' + i, chips: START, profile: H.ai.PROFILES[1] });
+  }
+  const tr = H.stats.create({ bigBlind: BB });
+  const final = [START, START, START, START];   // 탈락하면 g.players 에서 빠지므로 따로 센다
+  for (let h = 0; h < 60 && g.phase !== 'game-over'; h++) {
+    g.startHand();
+    if (g.phase === 'game-over') break;
+    tr.startHand(g);
+    let guard = 0;
+    while (g.phase !== 'hand-over' && g.phase !== 'game-over' && guard++ < 300) {
+      if (g.phase === 'awaiting-action') {
+        const p = g.currentActor();
+        g.act(p.id, H.ai.decide(g, p, { difficulty: 'normal' }));
+      } else if (g.phase === 'need-street') g.dealNextStreet();
+      else if (g.phase === 'showdown') g.resolveShowdown();
+      else if (g.phase === 'show-choice') g.chooseShow(false);
+    }
+    tr.endHand(g);
+    for (let i = 0; i < 4; i++) {
+      const p = g.players.find(function (q) { return q.id === i; });
+      final[i] = p ? p.chips : 0;
+    }
+  }
+  let sum = 0, anyWinner = false;
+  for (let i = 0; i < 4; i++) {
+    const x = tr.get(i);
+    sum += x.net;
+    eq(x.net, final[i] - START, 'P' + i + ' 의 손익이 실제 스택 변화와 다르다');
+    if (x.bb100 > 0) anyWinner = true;
+  }
+  eq(sum, 0, '손익 합계가 0 이 아니다');
+  assert(anyWinner, '이긴 사람이 하나도 없다');
+});
+test('all() 이 숫자 id 를 그대로 돌려준다 (좌석 색 매칭)', function () {
+  /*
+   * Object.keys 는 키를 문자열로 바꾼다. all() 이 그걸 쓰면 통계표의
+   * order.indexOf(s.id) 가 늘 -1 이 되어, 좌석 색 점이 전부 같은 색으로 찍혔다.
+   */
+  const tr = H.stats.create({ bigBlind: 20 });
+  [0, 1, 2].forEach(function (i) { tr.ensure(i, 'P' + i); });
+  const ids = tr.all().map(function (x) { return x.id; });
+  ids.forEach(function (id, i) {
+    assert(id === i, i + '번 id 가 숫자가 아니다: ' + JSON.stringify(id));
+  });
+  const back = H.stats.Tracker.fromJSON(JSON.parse(JSON.stringify(tr.toJSON())));
+  back.all().forEach(function (x, i) {
+    assert(x.id === i, '저장/복원 뒤 id 타입이 바뀌었다: ' + JSON.stringify(x.id));
+  });
 });
 
 console.log('\n[에쿼티 워커 커널]');

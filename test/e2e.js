@@ -145,6 +145,23 @@ async function playHands(page, target, opts) {
   check('칩 추이 차트가 그려진다', stats.chart);
   check('시리즈가 2개 이상이면 범례가 있다', stats.legend >= 2, '범례 ' + stats.legend);
 
+  /*
+   * 손익은 제로섬이다. 예전에는 트래커를 g.startHand() 앞에서 불러서 핸드 시작 스택이
+   * 부풀려졌고, 그 결과 전원이 마이너스인 bb/100 표가 나왔다.
+   */
+  const money = await page.evaluate(function () {
+    const S = window.HoldemUI;
+    const rows = S.tracker.all();
+    return {
+      sum: rows.reduce(function (t, x) { return t + x.net; }, 0),
+      net: rows.map(function (x) { return { name: x.name, net: x.net }; }),
+      winners: rows.filter(function (x) { return x.bb100 > 0; }).length
+    };
+  });
+  check('손익 합계가 제로섬이다 (전원 마이너스 표 재발 방지)',
+    Math.abs(money.sum) < 1e-6, '합계 ' + money.sum + ' · ' + JSON.stringify(money.net));
+  check('이긴 사람이 적어도 한 명은 있다', money.winners > 0, JSON.stringify(money.net));
+
   await dismissModals(page);
   const box = await page.locator('.chip-chart').boundingBox();
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.5);
@@ -203,12 +220,14 @@ async function playHands(page, target, opts) {
   console.log('\n[핸드 리뷰]');
   /* 리뷰 버튼은 핸드가 끝났을 때만 보인다 */
   await safeClick(page, '.tab[data-tab="log"]');
-  for (let i = 0; i < 40; i++) {
-    const vis = await page.evaluate(function () {
+  let reviewReady = false;
+  const reviewDeadline = Date.now() + 40000;
+  while (Date.now() < reviewDeadline) {
+    reviewReady = await page.evaluate(function () {
       const b = document.getElementById('btnReview');
       return !!(b.offsetParent) && !document.getElementById('nextRow').classList.contains('hidden');
     });
-    if (vis) break;
+    if (reviewReady) break;
     if (await page.$eval('#reviewModal', function (e) { return e.classList.contains('show'); })) {
       await page.click('#btnReviewClose');
       continue;
@@ -217,19 +236,26 @@ async function playHands(page, target, opts) {
       const g = window.HoldemUI.game;
       return { phase: g.phase, hero: !!(g.currentActor() && g.currentActor().isHuman) };
     });
+    if (st.phase === 'game-over') break;
     if (st.phase === 'show-choice') await page.click('#btnMuck');
     else if (st.phase === 'awaiting-action' && st.hero) await page.click('#btnCall');
     await page.waitForTimeout(200);
   }
-  await page.click('#btnReview');
-  await page.waitForTimeout(300);
-  const review = await page.evaluate(function () {
-    const open = document.getElementById('reviewModal').classList.contains('show');
-    return { open: open, rows: document.querySelectorAll('.review-row').length };
-  });
-  check('리뷰 모달이 열린다', review.open);
-  check('리뷰에 결정이 나열된다', review.rows >= 1, '항목 ' + review.rows);
-  await page.click('#btnReviewClose');
+  /* 여기서 무작정 클릭하면 Playwright 타임아웃으로 남은 스위트까지 통째로 죽는다 */
+  if (!reviewReady) {
+    check('리뷰 모달이 열린다', false, '핸드가 끝나지 않아 리뷰 버튼이 뜨지 않았다');
+    check('리뷰에 결정이 나열된다', false, '리뷰 버튼이 뜨지 않았다');
+  } else {
+    await page.click('#btnReview');
+    await page.waitForTimeout(300);
+    const review = await page.evaluate(function () {
+      const open = document.getElementById('reviewModal').classList.contains('show');
+      return { open: open, rows: document.querySelectorAll('.review-row').length };
+    });
+    check('리뷰 모달이 열린다', review.open);
+    check('리뷰에 결정이 나열된다', review.rows >= 1, '항목 ' + review.rows);
+    await page.click('#btnReviewClose');
+  }
 
   console.log('\n[저장과 복원]');
   const before = await page.evaluate(function () {

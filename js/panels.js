@@ -108,13 +108,15 @@
 
     const tbody = el('tbody');
     const order = game ? game.players.map(function (p) { return p.id; }) : [];
-    rows.sort(function (a, b) { return order.indexOf(a.id) - order.indexOf(b.id); });
+    /* 탈락한 사람은 game.players 에 없다 (-1) — 색도 자리도 산 사람 뒤로 뺀다 */
+    const rank = function (id) { const i = order.indexOf(id); return i < 0 ? order.length : i; };
+    rows.sort(function (a, b) { return rank(a.id) - rank(b.id); });
     rows.forEach(function (s) {
       const tr = el('tr', s.id === heroId ? 'hero' : null);
       const nameCell = el('td', 'name-col');
       const seat = order.indexOf(s.id);
       const dot = el('span', 'series-dot');
-      dot.style.background = SERIES[(seat < 0 ? 0 : seat) % SERIES.length];
+      dot.style.background = seat < 0 ? 'rgba(255,255,255,.22)' : SERIES[seat % SERIES.length];
       nameCell.appendChild(dot);
       nameCell.appendChild(document.createTextNode(s.name));
       tr.appendChild(nameCell);

@@ -705,7 +705,12 @@ kbd {
 
 /* ---------- 반응형 ---------- */
 @media (max-width: 1080px) {
-  .side { position: fixed; right: 12px; top: 56px; bottom: 12px; width: 300px; z-index: 30; }
+  /* 떠 있는 서랍이 된다 — 반투명하면 테이블 글자가 비쳐 통계를 읽을 수 없다 */
+  .side {
+    position: fixed; right: 12px; top: 56px; bottom: 12px; width: 300px; z-index: 30;
+    background: var(--panel);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .6);
+  }
 }
 /* 상단바가 두 줄로 넘어가기 전에 보조 정보부터 접는다 */
 @media (max-width: 900px) {

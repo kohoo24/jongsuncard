@@ -997,9 +997,10 @@
     state.reviewItems = [];
     state.handFinalized = false;
     state.chartState.userPicked = false;
-    state.tracker.startHand(g);
     g.startHand();
     if (g.phase === 'game-over') { loop(); return; }
+    /* 블라인드·앤티를 낸 뒤에 잰다 — 트래커는 chips + totalBet 으로 핸드 시작 스택을 되돌린다 */
+    state.tracker.startHand(g);
     computeDealOrder();
     state.deckSig = '';
     positionDeck(true);      // 딜링 출발점
@@ -1235,8 +1236,8 @@
     H.equity.initWorker();
 
     buildSeats();
-    state.tracker.startHand(g);
     g.startHand();
+    state.tracker.startHand(g);   // 블라인드·앤티를 낸 뒤에 (위 주석 참고)
     computeDealOrder();
     state.deckSig = '';
     positionDeck(true);      // 딜링 출발점

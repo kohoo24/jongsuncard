@@ -32,6 +32,7 @@
     this.data = {};
     this.names = {};
     this.chipHistory = {};   // id -> [{hand, chips}]
+    this.ids = [];           // 원래 타입 그대로의 id (Object.keys 는 문자열로 바꿔 버린다)
     this.handCount = 0;
   }
 
@@ -39,6 +40,7 @@
     if (!this.data[id]) {
       this.data[id] = blank();
       this.chipHistory[id] = [];
+      this.ids.push(id);
     }
     if (name) this.names[id] = name;
     return this.data[id];
@@ -157,7 +159,7 @@
 
   Tracker.prototype.all = function () {
     const self = this;
-    return Object.keys(this.data).map(function (id) { return self.get(id); });
+    return this.ids.map(function (id) { return self.get(id); });
   };
 
   Tracker.prototype.history = function (id) {
@@ -165,7 +167,9 @@
   };
 
   Tracker.prototype.toJSON = function () {
-    return { bigBlind: this.bigBlind, data: this.data, names: this.names, chipHistory: this.chipHistory, handCount: this.handCount };
+    /* ids 는 배열로 저장해야 숫자 id 가 살아남는다 (객체 키는 문자열이 된다) */
+    return { bigBlind: this.bigBlind, data: this.data, names: this.names,
+      chipHistory: this.chipHistory, ids: this.ids, handCount: this.handCount };
   };
 
   Tracker.fromJSON = function (obj) {
@@ -173,6 +177,7 @@
     t.data = obj.data || {};
     t.names = obj.names || {};
     t.chipHistory = obj.chipHistory || {};
+    t.ids = obj.ids || Object.keys(t.data);
     t.handCount = obj.handCount || 0;
     return t;
   };
