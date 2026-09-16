@@ -397,15 +397,28 @@
     return false;
   }
 
-  /* 테이블의 다른 플레이어 평균 VPIP (표본이 모자라면 null) */
+  /*
+   * 이 결정에 관련된 상대의 VPIP (표본이 모자라면 null).
+   * 레이즈에 직면했으면 그 어그레서, 아직 열리지 않았으면 뒤에 행동할 사람들의 평균.
+   * 테이블 전체 평균을 쓰면 다른 봇 좌석에 희석되어 9인에서는 한 번도 넘지 못했다.
+   */
   function opponentsVpip(ctx) {
+    const game = ctx.game, tracker = ctx.tracker;
+    const stat = function (p) {
+      const st = tracker.get(p.id);
+      return (st && st.hands >= TUNE.adaptiveHands) ? st.vpip : null;
+    };
+    if (game.raisesThisStreet >= 2 && game.aggressor && game.aggressor !== ctx.player) {
+      return stat(game.aggressor);
+    }
     let sum = 0, n = 0;
-    for (let i = 0; i < ctx.game.players.length; i++) {
-      const p = ctx.game.players[i];
-      if (p === ctx.player) continue;
-      const st = ctx.tracker.get(p.id);
-      if (!st || st.hands < TUNE.adaptiveHands) return null;
-      sum += st.vpip; n++;
+    const me = game.players.indexOf(ctx.player), total = game.players.length;
+    for (let k = 1; k < total; k++) {
+      const p = game.players[(me + k) % total];
+      if (p.folded || p.allIn) continue;
+      const v = stat(p);
+      if (v == null) return null;
+      sum += v; n++;
     }
     return n ? sum / n : null;
   }
