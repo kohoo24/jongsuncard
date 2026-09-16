@@ -229,13 +229,21 @@
   /* 표 순서 (차트·프로파일이 같은 순서를 쓴다) */
   const POSITION_ORDER = ['UTG', 'UTG1', 'MP', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'];
 
+  /* 풀링(7인 이상) 전용 표. 실험용으로 바꿔 끼울 수 있다 (H.ranges.OPEN_PCT_FULL) */
+  const OPEN_PCT_FULL = {
+    UTG: 0.123, UTG1: 0.141, MP: 0.158, LJ: 0.176, HJ: 0.202, CO: 0.229, BTN: 0.387, SB: 0.317, BB: 0.387
+  };
+
   function openPercent(pos, playerCount) {
     let base = OPEN_PCT[pos] != null ? OPEN_PCT[pos] : 0.22;
     // 인원이 적을수록 레인지가 넓어진다
     if (playerCount <= 2) base = pos === 'BTN' ? 0.60 : 0.50;
     else if (playerCount === 3) base *= 1.35;
     else if (playerCount === 4) base *= 1.18;
-    else if (playerCount >= 7) base *= 0.88;
+    else if (playerCount >= 7) {
+      const full = H.ranges && H.ranges.OPEN_PCT_FULL ? H.ranges.OPEN_PCT_FULL : OPEN_PCT_FULL;
+      base = full[pos] != null ? full[pos] : base * 0.88;
+    }
     return Math.min(0.92, base);
   }
 
@@ -448,6 +456,7 @@
     RANKED: RANKED,
     INFO: INFO,
     OPEN_PCT: OPEN_PCT,
+    OPEN_PCT_FULL: OPEN_PCT_FULL,
     POSITION_ORDER: POSITION_ORDER,
     positionsFor: positionsFor,
     ACTION_BANDS: ACTION_BANDS,

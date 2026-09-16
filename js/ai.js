@@ -46,6 +46,29 @@
     '승현', '아린', '주원', '한결', '유진', '동하'
   ];
 
+  /* ---------- 튜닝 상수 (벤치마크로 고른다) ---------- */
+  const TUNE = {
+    openBase: 2.2,          // 오픈 사이즈(bb)
+    openPerPlayerOver6: 0.1, // 6인 초과 한 명당 오픈 사이즈 가산(bb) — 9인 2.5bb. 작은 오픈은 멀티웨이를 부른다
+    multiwayRz: 1.0,         // 상대 한 명 추가될 때마다 곱하는 실현율 (줄이면 너무 수동적이 된다: 0.88 → -10bb/100)
+    likelyCallers: false,    // 콜당했을 때의 승률을 기대 콜러 수만큼의 상대로만 계산 (9인 -8: 채택 안 함)
+    overcallTighten: 0.12,   // 오픈에 이미 콜러가 있을 때 콜러 한 명당 콜 기준 축소 비율
+    noSqueezeBluff: false,   // 콜러가 있는 팟에는 블러프 3벳을 하지 않는다 (스퀴즈 블러프는 드물어 효과 없음)
+    multiwayClass: false     // 멀티웨이 콜 판단에서 수티드 커넥터·페어는 올리고 오프수트 브로드웨이는 내린다
+  };
+
+  /* 멀티웨이 팟용 핸드 가치 보정: 백분위 순위는 헤즈업 기준이라 상대가 많을수록 어긋난다 */
+  function multiwayPct(pct, cards) {
+    const info = R.INFO[R.classOf(cards[0], cards[1])];
+    if (!info) return pct;
+    if (info.pair) return pct * 0.85;
+    if (info.suited && (info.hi - info.lo) <= 3) return pct * 0.85;
+    if (info.suited && info.hi === 14) return pct * 0.9;
+    if (!info.suited && info.hi >= 12 && info.lo >= 9) return pct * 1.25;   // 오프수트 브로드웨이
+    if (!info.suited && info.hi === 14) return pct * 1.2;                    // 오프수트 약한 에이스
+    return pct;
+  }
+
   /* ---------- 난이도 ---------- */
   const DIFFICULTY = {
     easy: {
@@ -247,7 +270,8 @@
       if (myPct <= openPct) {
         const limpers = countLimpers(game);
         ctx.think.plan = 'open';
-        return raiseTo(ctx, bb * (2.2 + 0.9 * limpers) * prof.sizeMult + (game.currentBet - bb));
+        const base = TUNE.openBase + TUNE.openPerPlayerOver6 * Math.max(0, ctx.n - 6);
+        return raiseTo(ctx, bb * (base + 0.9 * limpers) * prof.sizeMult + (game.currentBet - bb));
       }
       if (a.canCheck) { ctx.think.plan = 'check'; return { type: 'check' }; }
       if (a.toCall <= bb && myPct <= openPct * 1.9 && rand() < prof.callMult * 0.22) {
@@ -260,23 +284,30 @@
 
     /* 레이즈에 직면 */
     const threeBetSpot = raises === 2;
+    let callersSoFar = 0;
+    game.handActions.forEach(function (x) {
+      if (x.street === 'preflop' && x.type === 'call' && x.raisesBefore >= 2) callersSoFar++;
+    });
     const valueRe = (threeBetSpot ? 0.055 : 0.026) * (1 + (prof.bluffMult - 1) * 0.2);
     const bluffReHi = threeBetSpot ? 0.055 + 0.050 * prof.bluffMult * diff.bluffScale : 0;
     let callCap = callCapFor(raises, ctx.pos) * prof.callMult * diff.wideFactor;
     if (potOdds < 0.18) callCap *= 1.35;       // 아주 싼 콜이면 넓힌다
     else if (potOdds > 0.38) callCap *= 0.70;  // 비싸면 좁힌다
+    callCap *= Math.max(0.5, 1 - TUNE.overcallTighten * callersSoFar);   // 오버콜은 더 좁게
     callCap = Math.min(0.60, callCap);
     ctx.think.callCap = callCap;
+    const callPct = (TUNE.multiwayClass && callersSoFar > 0) ? multiwayPct(myPct, player.cards) : myPct;
 
     if (a.canRaise && myPct <= valueRe) {
       ctx.think.plan = threeBetSpot ? '3bet-value' : '4bet-value';
       return raiseTo(ctx, game.currentBet * 3 + pot * 0.12);
     }
-    if (a.canRaise && myPct > callCap && myPct <= bluffReHi && rand() < 0.4 * prof.bluffMult * diff.bluffScale) {
+    const squeezeOk = !(TUNE.noSqueezeBluff && callersSoFar > 0);
+    if (a.canRaise && squeezeOk && myPct > callCap && myPct <= bluffReHi && rand() < 0.4 * prof.bluffMult * diff.bluffScale) {
       ctx.think.plan = '3bet-bluff';
       return raiseTo(ctx, game.currentBet * 2.8);
     }
-    if (myPct <= callCap) { ctx.think.plan = 'call'; return { type: 'call' }; }
+    if (callPct <= callCap) { ctx.think.plan = 'call'; return { type: 'call' }; }
     if (a.canCheck) { ctx.think.plan = 'check'; return { type: 'check' }; }
     ctx.think.plan = 'fold';
     return { type: 'fold' };
@@ -305,8 +336,9 @@
 
     const topPct = dist ? E.pctOfValue(dist, H.eval.score(player.cards.concat(game.community))) : null;
     const inPos = isInPosition(ctx);
-    // 에쿼티 실현율: 포지션이 나쁘면 끝까지 가기 어렵다
-    const rz = game.street === 'river' ? 1 : (inPos ? 0.90 : 0.80);
+    // 에쿼티 실현율: 포지션이 나쁘면 끝까지 가기 어렵고, 상대가 많을수록 더 어렵다
+    const rz = game.street === 'river' ? 1
+      : (inPos ? 0.90 : 0.80) * Math.pow(TUNE.multiwayRz, Math.max(0, ctx.opponents.length - 1));
 
     const candidates = [];
     if (a.canCheck) {
@@ -345,10 +377,19 @@
         }
 
         /* 콜당했을 때의 승률은 따로 계산한다 (상대는 좋은 패로만 콜한다) —
-           지금 레인지의 가중 질량 중 강한 쪽 (1-pf) 만 남긴다 */
+           지금 레인지의 가중 질량 중 강한 쪽 (1-pf) 만 남긴다.
+           멀티웨이: 전원이 동시에 콜한다고 보면 승률이 지나치게 낮아진다. 기대 콜러 수만큼,
+           콜 확률이 높은 상대부터 넣는다. */
         let eqCalled = eq;
         if (dist && pFoldAll < 0.96) {
-          const cc = combos.map(function (c, i) { return E.continueRange(c, shares[i]); });
+          let idx = combos.map(function (c, i) { return i; });
+          if (TUNE.likelyCallers && ranges.length > 1) {
+            const pCalledTmp = 1 - pFoldAll;
+            const k = Math.max(1, Math.min(ranges.length, Math.round(expCallers / pCalledTmp)));
+            idx.sort(function (a, b) { return shares[b] - shares[a]; });
+            idx = idx.slice(0, k);
+          }
+          const cc = idx.map(function (i) { return E.continueRange(combos[i], shares[i]); });
           eqCalled = E.vsRanges({
             hole: holeCodes, board: boardCodes, combos: cc,
             sims: Math.max(400, diff.sims >> 1), seed: seed + 1
@@ -520,6 +561,7 @@
     NAMES: NAMES,
     DIFFICULTY: DIFFICULTY,
     KEEP_FOR_RATIO: KEEP_FOR_RATIO,
+    TUNE: TUNE,
     decide: decide,
     analyze: analyze,
     evaluateOptions: evaluateOptions,
