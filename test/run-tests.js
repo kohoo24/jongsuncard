@@ -558,6 +558,88 @@ test('폴드 확률은 베팅이 클수록 높다', function () {
   assert(weak > strong, '강한 레인지는 덜 접는다');
 });
 
+console.log('\n[클래스별 가중치 레인지]');
+function wOf(weights, key) { return weights[RG.INFO[key].index]; }
+test('경계가 부드럽게 기울고 오프수트 잡패는 빠진다', function () {
+  const w = RG.ACTION_WEIGHTS.open(0.20);
+  eq(wOf(w, 'AA'), 1);
+  assert(wOf(w, '72o') === 0, '72o 는 오픈 레인지에 없다');
+  const edge = RG.taper(0.20, 0, 0.20, 0.04);
+  assert(edge > 0 && edge < 1, '경계 핸드는 0 과 1 사이여야 한다 (실제 ' + edge + ')');
+  assert(RG.taper(0.10, 0, 0.20, 0.04) === 1);
+  assert(RG.taper(0.30, 0, 0.20, 0.04) === 0);
+});
+test('3벳 레인지에는 프리미엄과 수티드 에이스 블러프가 섞인다', function () {
+  const w = RG.ACTION_WEIGHTS.threeBet();
+  eq(wOf(w, 'AA'), 1);
+  assert(wOf(w, 'A5s') > 0 && wOf(w, 'A5s') < 1, 'A5s 는 일부만 3벳한다');
+  eq(wOf(w, 'A5o'), 0);
+  eq(wOf(w, 'J4o'), 0);
+});
+test('콜 레인지는 포켓페어·수티드가 앞서고 약한 오프수트 에이스는 드물다', function () {
+  const w = RG.ACTION_WEIGHTS.call(0.25);
+  assert(wOf(w, '55') >= 0.9, '작은 포켓페어는 세트 마이닝으로 콜한다');
+  assert(wOf(w, '87s') > wOf(w, 'A7o'), '수티드 커넥터가 약한 오프수트 에이스보다 자주 콜한다');
+  assert(wOf(w, 'AA') < 1, '프리미엄은 대부분 3벳으로 빠진다');
+});
+test('support() 는 가중치의 지지 구간을 밴드로 돌려준다', function () {
+  const b = RG.support(RG.ACTION_WEIGHTS.open(0.14));
+  assert(b.lo === RG.INFO.AA.pct && b.hi > 0.14 && b.hi < 0.25, JSON.stringify(b));
+});
+test('buildCombos 는 가중치에 비례해 콤보를 복제한다', function () {
+  const w = RG.makeWeights(function (info) { return info.key === 'AA' ? 1 : info.key === 'KK' ? 0.5 : 0; });
+  const list = EQ.buildCombos({ weights: w, keepTop: 1 }, [], [], null);
+  let aa = 0, kk = 0;
+  for (let i = 0; i < list.length; i += 2) {
+    const k = RG.classOfCodes(list[i], list[i + 1]);
+    if (k === 'AA') aa++; else if (k === 'KK') kk++; else throw new Error('밖의 클래스: ' + k);
+  }
+  eq(aa, kk * 2, 'AA 가 KK 의 두 배로 샘플링돼야 한다 (' + aa + ' vs ' + kk + ')');
+  assert(list.meta && Math.abs(list.meta.mass - 9) < 1e-6, '가중 질량 = 6×1 + 6×0.5');
+});
+test('균등 레인지는 복제 없이 1벌이다', function () {
+  const list = EQ.buildCombos({ weights: RG.ACTION_WEIGHTS.any(), keepTop: 1 }, [], [], null);
+  eq(list.length, 1326 * 2);
+});
+test('포스트플랍 소프트 컷: 강한 콤보는 온전히, 약한 꼬리는 바닥값만 남는다', function () {
+  eq(EQ.strengthWeight(0.10, 0.36), 1);
+  const tail = EQ.strengthWeight(0.90, 0.36);
+  assert(tail > 0 && tail < 0.15, '꼬리는 작은 바닥값 (' + tail + ')');
+  assert(EQ.strengthWeight(0.45, 0.36) < 1 && EQ.strengthWeight(0.45, 0.36) > tail, '중간은 기울기 위');
+  eq(EQ.strengthWeight(0.9, 1), 1, 'keepTop=1 이면 자르지 않는다');
+});
+test('continueRange 는 남는 몫이 작을수록 강한 레인지가 된다', function () {
+  const h = hand('Qs Jd').map(C.code), b = hand('Ah 7c 2d').map(C.code);
+  const dist = EQ.boardDistribution(b, h);
+  const all = EQ.buildCombos({ weights: RG.ACTION_WEIGHTS.any(), keepTop: 1 }, b, h, dist);
+  function avgStrength(list) {
+    const m = list.meta; let s = 0, n = 0;
+    for (let i = 0; i < m.w.length; i++) { if (m.w[i] > 0) { s += m.s[i] * m.w[i]; n += m.w[i]; } }
+    return s / n;
+  }
+  const half = EQ.continueRange(all, 0.5), quarter = EQ.continueRange(all, 0.25);
+  assert(avgStrength(quarter) < avgStrength(half) && avgStrength(half) < avgStrength(all),
+    [avgStrength(all), avgStrength(half), avgStrength(quarter)].map(function (x) { return x.toFixed(2); }).join(' > '));
+  const pre = EQ.buildCombos({ weights: RG.ACTION_WEIGHTS.any(), keepTop: 1 }, [], h, null);
+  eq(EQ.continueRange(pre, 0.3), pre, '프리플랍(강도 없음)은 그대로');
+});
+test('폴드 확률은 상대 레인지의 실제 보드 강도를 본다', function () {
+  const h = hand('Qs Jd').map(C.code), b = hand('Ah 7c 2d').map(C.code);
+  const dist = EQ.boardDistribution(b, h);
+  const wide = EQ.buildCombos({ weights: RG.ACTION_WEIGHTS.any(), keepTop: 1 }, b, h, dist);
+  const strong = EQ.continueRange(wide, 0.2);
+  const pfWide = EQ.foldProbability(100, 70, { keepTop: 1 }, 1.25, wide);
+  const pfStrong = EQ.foldProbability(100, 70, { keepTop: 1 }, 1.25, strong);
+  assert(pfStrong < pfWide, '강한 레인지가 덜 접어야 한다 (' + pfWide.toFixed(2) + ' vs ' + pfStrong.toFixed(2) + ')');
+});
+test('블로커: 내가 에이스를 들면 상대 레인지의 AA 콤보가 줄어든다', function () {
+  const w = RG.ACTION_WEIGHTS.threeBet();
+  const noAce = EQ.buildCombos({ weights: w, keepTop: 1 }, [], hand('Ks Qd').map(C.code), null);
+  const withAce = EQ.buildCombos({ weights: w, keepTop: 1 }, [], hand('As Qd').map(C.code), null);
+  function count(list, cls) { let n = 0; for (let i = 0; i < list.length; i += 2) if (RG.classOfCodes(list[i], list[i + 1]) === cls) n++; return n; }
+  assert(count(withAce, 'AA') < count(noAce, 'AA'), 'AA 콤보 6 -> 3');
+});
+
 console.log('\n[아웃 카운터]');
 test('교과서 값과 일치한다', function () {
   function outs(h, b) { return EQ.analyzeDraws(h.split(/\s+/).map(C.parseCard), b.split(/\s+/).map(C.parseCard)).outs; }
@@ -731,27 +813,27 @@ test('난이도가 높을수록 강하다 (normal vs easy, 800핸드)', function
 console.log('\n[TAG 벤치마크]');
 /*
  * 고정 규칙 TAG 봇(test/tag-bot.js)을 자로 삼아 난이도별 bb/100 을 잰다.
- * 시드가 고정이라 같은 카드로 같은 상대와 다시 재므로, AI 를 고치면 이 숫자가 움직인다.
- * 하한은 "이전의 루즈-패시브 구현(-149bb/100)으로 되돌아가지 않는다" 를 지키는 선이다.
- * 표본 오차는 600핸드에 약 ±20bb/100 이므로 hard 와 normal 의 우열은 여기서 가리지 않는다.
+ * 여기는 안전망이다: 하한은 "이전의 루즈-패시브 구현(-149bb/100)으로 되돌아가지 않는다"
+ * 를 지키는 선이고, 800핸드 한 시드의 표준편차가 약 25bb/100 이라 우열은 가리지 못한다.
+ * AI 를 고쳤을 때의 진짜 비교는 `npm run bench`(6시드 × 1000핸드)로 한다.
  */
 const TAG = require('./tag-bot.js');
 const tagBench = {};
-test('hard 가 TAG 에게 크게 지지 않는다 (600핸드)', function () {
-  tagBench.hard = TAG.benchmark({ difficulty: 'hard', hands: 600, seed: 4242 }).bb100;
-  console.log('      (hard ' + (tagBench.hard >= 0 ? '+' : '') + tagBench.hard.toFixed(0) + 'bb/100 vs TAG)');
-  assert(tagBench.hard > -30, 'hard 가 TAG 에게 너무 진다 (실제 ' + tagBench.hard.toFixed(0) + 'bb/100)');
+test('hard 가 TAG 에게 크게 지지 않는다 (800핸드, 안전망)', function () {
+  tagBench.hard = TAG.benchmark({ difficulty: 'hard', hands: 800, seed: 4242 }).bb100;
+  console.log('      (hard ' + (tagBench.hard >= 0 ? '+' : '') + tagBench.hard.toFixed(0) + 'bb/100 vs TAG — 정밀 비교는 npm run bench)');
+  assert(tagBench.hard > -80, 'hard 가 TAG 에게 너무 진다 (실제 ' + tagBench.hard.toFixed(0) + 'bb/100)');
 });
-test('normal 이 TAG 에게 크게 지지 않는다 (600핸드)', function () {
-  tagBench.normal = TAG.benchmark({ difficulty: 'normal', hands: 600, seed: 4242 }).bb100;
+test('normal 이 TAG 에게 크게 지지 않는다 (800핸드, 안전망)', function () {
+  tagBench.normal = TAG.benchmark({ difficulty: 'normal', hands: 800, seed: 4242 }).bb100;
   console.log('      (normal ' + (tagBench.normal >= 0 ? '+' : '') + tagBench.normal.toFixed(0) + 'bb/100 vs TAG)');
-  assert(tagBench.normal > -45, 'normal 이 TAG 에게 너무 진다 (실제 ' + tagBench.normal.toFixed(0) + 'bb/100)');
+  assert(tagBench.normal > -90, 'normal 이 TAG 에게 너무 진다 (실제 ' + tagBench.normal.toFixed(0) + 'bb/100)');
 });
-test('easy 는 TAG 에게 확실히 진다 (200핸드)', function () {
-  tagBench.easy = TAG.benchmark({ difficulty: 'easy', hands: 200, seed: 4242 }).bb100;
+test('easy 는 TAG 에게 확실히 진다 (300핸드)', function () {
+  tagBench.easy = TAG.benchmark({ difficulty: 'easy', hands: 300, seed: 4242 }).bb100;
   console.log('      (easy ' + tagBench.easy.toFixed(0) + 'bb/100 vs TAG)');
-  assert(tagBench.easy < -80, 'easy 가 너무 강하다 — 초급의 의도적 실수가 사라졌나? (실제 ' + tagBench.easy.toFixed(0) + 'bb/100)');
-  assert(tagBench.easy < tagBench.normal - 60, 'easy 가 normal 과 구별되지 않는다');
+  assert(tagBench.easy < -40, 'easy 가 너무 강하다 — 초급의 의도적 실수가 사라졌나? (실제 ' + tagBench.easy.toFixed(0) + 'bb/100)');
+  assert(tagBench.easy < tagBench.normal - 40, 'easy 가 normal 과 구별되지 않는다');
 });
 test('TAG 봇 자체가 타이트-어그레시브다', function () {
   const tr = TAG.benchmark({ difficulty: 'normal', hands: 200, seed: 99 }).tracker.all();

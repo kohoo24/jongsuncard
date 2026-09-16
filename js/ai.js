@@ -113,12 +113,16 @@
     return Math.max(0.12, Math.min(0.6, (sum / positions.length) * 1.15));
   }
 
-  /* 베팅 사이즈(팟 대비) -> 남는 레인지 비율 */
+  /*
+   * 베팅 사이즈(팟 대비) -> 남는 레인지 비율 (소프트 컷의 중심).
+   * 예전 표(0.58/0.45/0.34/0.26)는 벳 레인지를 너무 넓게 봐서 밸류벳에 콜을 남발했다.
+   * 6시드 × 1000핸드 TAG 벤치마크: 옛 표 normal -2 / hard -15 → 이 표 +6 / +8 bb/100.
+   */
+  const KEEP_FOR_RATIO = [[0.40, 0.50], [0.70, 0.36], [1.10, 0.28], [Infinity, 0.20]];
   function keepForRatio(r) {
-    if (r < 0.40) return 0.58;
-    if (r < 0.70) return 0.45;
-    if (r < 1.10) return 0.34;
-    return 0.26;
+    const table = H.ai && H.ai.KEEP_FOR_RATIO ? H.ai.KEEP_FOR_RATIO : KEEP_FOR_RATIO;
+    for (let i = 0; i < table.length; i++) if (r < table[i][0]) return table[i][1];
+    return table[table.length - 1][1];
   }
 
   /*
@@ -156,14 +160,15 @@
       }
     }
 
-    let band;
+    /* 클래스별 가중치. 밴드는 지지 구간(호환용) */
+    let weights;
     if (!ctx.diff.useRanges) {
-      band = R.band(0, 1);
+      weights = R.ACTION_WEIGHTS.any();
     } else {
       const pre = game.actionsOf(opp.id, 'preflop');
-      const B = R.ACTION_BANDS;
+      const W = R.ACTION_WEIGHTS;
       if (!pre.length) {
-        band = R.band(0, Math.min(1, openPct * 2.2));
+        weights = W.open(Math.min(1, openPct * 2.2));
       } else {
         let raises = 0, called = false, facedRaise = false;
         for (let i = 0; i < pre.length; i++) {
@@ -172,14 +177,15 @@
           else if (act.type === 'call') called = true;
           if (act.raisesBefore >= 2) facedRaise = true;
         }
-        if (raises >= 2) band = B.fourBet();
-        else if (raises === 1 && facedRaise) band = B.threeBet();
-        else if (raises === 1) band = B.open(openPct);
-        else if (called && facedRaise) band = B.callThree();
-        else if (called) band = pos === 'BB' ? B.defendBB(openPct) : B.call(openPct);
-        else band = B.limp(openPct);
+        if (raises >= 2) weights = W.fourBet();
+        else if (raises === 1 && facedRaise) weights = W.threeBet();
+        else if (raises === 1) weights = W.open(openPct);
+        else if (called && facedRaise) weights = W.callThree();
+        else if (called) weights = pos === 'BB' ? W.defendBB(openPct) : W.call(openPct);
+        else weights = W.limp(openPct);
       }
     }
+    const band = R.support(weights);
 
     let keepTop = 1;
     if (ctx.diff.useRanges) {
@@ -196,7 +202,7 @@
         }
       }
     }
-    return { band: band, keepTop: keepTop, pos: pos, id: opp.id };
+    return { weights: weights, band: band, keepTop: keepTop, pos: pos, id: opp.id };
   }
 
   /* ---------- 레이즈 금액 정리 ---------- */
@@ -330,21 +336,19 @@
         if (theirCall <= 0) return;
 
         let pFoldAll = 1, expCallers = 0;
-        const callRanges = [];
+        const shares = [];
         for (let i = 0; i < ranges.length; i++) {
-          const pf = E.foldProbability(pot, theirCall, ranges[i], overFoldOf(ctx, ctx.opponents[i]));
+          const pf = E.foldProbability(pot, theirCall, ranges[i], overFoldOf(ctx, ctx.opponents[i]), combos[i]);
           pFoldAll *= pf;
           expCallers += (1 - pf);
-          callRanges.push({
-            band: ranges[i].band,
-            keepTop: Math.min(ranges[i].keepTop, Math.max(0.08, 1 - pf))
-          });
+          shares.push(Math.max(0.08, 1 - pf));
         }
 
-        /* 콜당했을 때의 승률은 따로 계산한다 (상대는 좋은 패로만 콜한다) */
+        /* 콜당했을 때의 승률은 따로 계산한다 (상대는 좋은 패로만 콜한다) —
+           지금 레인지의 가중 질량 중 강한 쪽 (1-pf) 만 남긴다 */
         let eqCalled = eq;
         if (dist && pFoldAll < 0.96) {
-          const cc = callRanges.map(function (r) { return E.buildCombos(r, boardCodes, holeCodes, dist); });
+          const cc = combos.map(function (c, i) { return E.continueRange(c, shares[i]); });
           eqCalled = E.vsRanges({
             hole: holeCodes, board: boardCodes, combos: cc,
             sims: Math.max(400, diff.sims >> 1), seed: seed + 1
@@ -506,7 +510,7 @@
     const board = (boardCards || []).map(H.cards.code);
     const dist = board.length >= 3 ? E.boardDistribution(board, hole) : null;
     const combos = [];
-    const wide = { band: R.band(0, 1), keepTop: 1 };
+    const wide = { weights: R.ACTION_WEIGHTS.any(), keepTop: 1 };
     for (let i = 0; i < opponents; i++) combos.push(E.buildCombos(wide, board, hole, dist));
     return E.vsRanges({ hole: hole, board: board, combos: combos, sims: sims || 1000 }).equity;
   }
@@ -515,6 +519,7 @@
     PROFILES: PROFILES,
     NAMES: NAMES,
     DIFFICULTY: DIFFICULTY,
+    KEEP_FOR_RATIO: KEEP_FOR_RATIO,
     decide: decide,
     analyze: analyze,
     evaluateOptions: evaluateOptions,

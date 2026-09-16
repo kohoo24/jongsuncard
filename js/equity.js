@@ -155,12 +155,64 @@
 
   /* ---------- 상대 레인지 -> 허용 홀카드 조합 목록 ---------- */
   const comboBuf = new Int32Array(7);
+  const QUANT = 8;   // 가중치를 복제 수 0~8 로 양자화한다 (커널은 균등 샘플링 그대로)
+
+  /*
+   * 보드 위 강도(상위 s, 0=최강)에 따른 연속 가중치. keepTop 을 중심으로 부드럽게
+   * 자른다 — 하드 컷과 달리 약한 꼬리에 바닥값이 남아 블러프·플로트 몫이 된다.
+   * 큰 벳(keepTop 작음)일수록 바닥이 낮다.
+   */
+  function strengthWeight(s, keepTop) {
+    if (keepTop >= 0.999) return 1;
+    const hi = keepTop * 0.85, lo = keepTop * 1.5;
+    const floor = Math.max(0.03, keepTop * 0.2);
+    if (s <= hi) return 1;
+    if (s >= lo) return floor;
+    return 1 - (1 - floor) * ((s - hi) / (lo - hi));
+  }
+
+  function classIndexOfCodes(a, b) {
+    const R = H.ranges;
+    return R.INFO[R.classOfCodes(a, b)].index;
+  }
+
+  /* 유일 콤보 목록(pairs/w/s) -> 복제 수 양자화된 Int32Array (+meta) */
+  function quantize(pairs, w, s, boardLen) {
+    /* 샘플링은 비율만 중요하므로 최대 가중치를 QUANT 복제로 맞춘다. 거의 균등하면 1복제씩.
+       QUANT/2 분의 1 에 못 미치는 가중치는 0 이 된다 — 반올림으로 부풀리면 안 된다
+       (바닥값 0.05 가 0.25 로 커져 있지도 않은 블러프가 레인지에 들어간다). */
+    let wmax = 0, wmin = Infinity;
+    for (let i = 0; i < w.length; i++) {
+      if (w[i] <= 0) continue;
+      if (w[i] > wmax) wmax = w[i];
+      if (w[i] < wmin) wmin = w[i];
+    }
+    const uniform = wmax > 0 && wmin / wmax > 0.9;
+    const out = [];
+    let mass = 0, strong = 0;
+    for (let i = 0; i < w.length; i++) {
+      if (w[i] <= 0) continue;
+      const k = uniform ? 1 : Math.round(w[i] / wmax * QUANT);
+      if (k < 1) continue;
+      for (let c = 0; c < k; c++) out.push(pairs[i << 1], pairs[(i << 1) + 1]);
+      mass += w[i];
+      if (s && s[i] >= 0 && s[i] <= 0.35) strong += w[i];
+    }
+    const arr = new Int32Array(out);
+    arr.meta = {
+      pairs: pairs, w: w, s: s, boardLen: boardLen,
+      mass: mass,
+      strongShare: mass > 0 && s ? strong / mass : null   // 보드 위 상위 35% 에 드는 몫
+    };
+    return arr;
+  }
 
   /**
-   * @param {object} range  {band:{lo,hi}, keepTop:0~1}  keepTop 이 작을수록 강한 레인지
+   * @param {object} range  {weights: Float32Array(169)} 또는 {band:{lo,hi}}, keepTop:0~1
+   *                        keepTop 이 작을수록 강한 레인지(포스트플랍 소프트 컷의 중심)
    * @param {Array}  boardCodes
    * @param {Array}  deadCodes  이미 알려진 카드(내 홀카드 등)
-   * @param {Array}  dist  boardDistribution 결과 (없으면 강도 필터 생략)
+   * @param {Array}  dist  boardDistribution 결과 (없으면 강도 가중 생략)
    */
   function buildCombos(range, boardCodes, deadCodes, dist) {
     const R = H.ranges;
@@ -170,35 +222,71 @@
     const live = [];
     for (let c = 0; c < 52; c++) if (!dead[c]) live.push(c);
 
-    const band = range.band || { lo: 0, hi: 1 };
+    const weights = range.weights || R.weightsFromBand(range.band || { lo: 0, hi: 1 });
     const keepTop = range.keepTop == null ? 1 : range.keepTop;
     const boardLen = boardCodes.length;
-    const threshold = (keepTop < 0.999 && dist) ? valueAtTopPct(dist, keepTop) : -1;
+    const useDist = !!dist && boardLen >= 3;
 
     for (let i = 0; i < boardLen; i++) comboBuf[2 + i] = boardCodes[i];
 
-    const out = [];
-    const bandOnly = [];
+    const pairs = [], wClass = [], sList = [];
     for (let i = 0; i < live.length; i++) {
       for (let j = i + 1; j < live.length; j++) {
         const a = live[i], b = live[j];
-        const pct = R.percentile(R.classOfCodes(a, b));
-        if (pct < band.lo || pct > band.hi) continue;
-        bandOnly.push(a, b);
-        if (threshold >= 0) {
+        const wc = weights[classIndexOfCodes(a, b)];
+        if (wc <= 0) continue;
+        pairs.push(a, b);
+        wClass.push(wc);
+        if (useDist) {
           comboBuf[0] = a; comboBuf[1] = b;
-          if (K.evalCodes(comboBuf, boardLen + 2) < threshold) continue;
-        }
-        out.push(a, b);
+          sList.push(pctOfValue(dist, K.evalCodes(comboBuf, boardLen + 2)));
+        } else sList.push(-1);
       }
     }
-    // 레인지가 지나치게 좁아지면 단계적으로 완화한다
-    if (out.length >= 8) return new Int32Array(out);
-    if (bandOnly.length >= 8) return new Int32Array(bandOnly);
-    const all = [];
+    const pairArr = new Int32Array(pairs);
+    const sArr = useDist ? new Float32Array(sList) : null;
+
+    /* 강도 가중 */
+    const w = new Float32Array(wClass.length);
+    for (let i = 0; i < w.length; i++) {
+      w[i] = useDist ? wClass[i] * strengthWeight(sList[i], keepTop) : wClass[i];
+    }
+    let arr = quantize(pairArr, w, sArr, boardLen);
+    if (arr.length >= 8 * 2) return arr;
+
+    /* 레인지가 지나치게 좁아지면 단계적으로 완화한다: 강도 가중 제거 -> 전체 */
+    arr = quantize(pairArr, new Float32Array(wClass), sArr, boardLen);
+    if (arr.length >= 8 * 2) return arr;
+    const allPairs = [];
     for (let i = 0; i < live.length; i++)
-      for (let j = i + 1; j < live.length; j++) all.push(live[i], live[j]);
-    return new Int32Array(all);
+      for (let j = i + 1; j < live.length; j++) allPairs.push(live[i], live[j]);
+    const ones = new Float32Array(allPairs.length >> 1);
+    for (let i = 0; i < ones.length; i++) ones[i] = 1;
+    return quantize(new Int32Array(allPairs), ones, null, boardLen);
+  }
+
+  /**
+   * 벳을 받은 뒤 남는 레인지: 가중 질량의 상위 share 만큼을 강한 순으로 남긴다(소프트).
+   * 보드 강도가 없으면(프리플랍) 그대로 돌려준다.
+   */
+  function continueRange(combos, share) {
+    const m = combos.meta;
+    if (!m || !m.s || share >= 0.999 || m.mass <= 0) return combos;
+    const n = m.w.length;
+    const idx = [];
+    for (let i = 0; i < n; i++) if (m.w[i] > 0) idx.push(i);
+    idx.sort(function (a, b) { return m.s[a] - m.s[b]; });
+    // 누적 질량이 share 에 닿는 강도 s* 를 찾는다
+    let acc = 0, cut = 1;
+    const target = m.mass * share;
+    for (let k = 0; k < idx.length; k++) {
+      acc += m.w[idx[k]];
+      if (acc >= target) { cut = m.s[idx[k]]; break; }
+    }
+    const w2 = new Float32Array(n);
+    for (let i = 0; i < n; i++) w2[i] = m.w[i] > 0 ? m.w[i] * strengthWeight(m.s[i], Math.max(0.05, cut)) : 0;
+    const out = quantize(m.pairs, w2, m.s, m.boardLen);
+    return out.length >= 8 * 2 ? out : combos;
   }
 
   /* ---------- 동기 승률 계산 ---------- */
@@ -288,11 +376,17 @@
    * MDF(최소 방어 빈도) b/(p+b) 를 기준으로, 실제 플레이어는 그보다 더 접으므로
    * overFold 계수를 곱한다. 레인지가 강할수록(minStrength 높을수록) 덜 접는다.
    */
-  function foldProbability(potSize, betSize, range, overFold) {
+  function foldProbability(potSize, betSize, range, overFold, combos) {
     if (betSize <= 0) return 0;
     const mdf = betSize / (potSize + betSize);          // 최소 방어 빈도
-    const keepTop = range && range.keepTop != null ? range.keepTop : 1;
-    const strength = 1 - keepTop;                        // 0=넓고 약함, 1=아주 강함
+    let strength;
+    if (combos && combos.meta && combos.meta.strongShare != null) {
+      /* 상대 레인지 중 보드 위 상위 35% 에 드는 몫. 아무 레인지나 35% 는 들어가므로 그 위부터 센다 */
+      strength = Math.max(0, (combos.meta.strongShare - 0.35) / 0.65);
+    } else {
+      const keepTop = range && range.keepTop != null ? range.keepTop : 1;
+      strength = 1 - keepTop;                            // 0=넓고 약함, 1=아주 강함
+    }
     let p = mdf * (overFold != null ? overFold : 1.35) * (1 - strength * 0.55);
     return Math.max(0.02, Math.min(0.92, p));
   }
@@ -398,6 +492,8 @@
     valueAtTopPct: valueAtTopPct,
     pctOfValue: pctOfValue,
     buildCombos: buildCombos,
+    continueRange: continueRange,
+    strengthWeight: strengthWeight,
     vsRanges: vsRanges,
     vsRangesAsync: vsRangesAsync,
     foldProbability: foldProbability,

@@ -270,6 +270,138 @@
     defendBB:  function (openPct) { return band(openPct * 0.25, Math.min(0.85, openPct * 2.6)); }
   };
 
+  /* ---------- 클래스별 가중치 레인지 ----------
+   *
+   * 밴드 [lo, hi] 는 "들어간다/안 들어간다" 뿐이라 같은 백분위의 수티드 커넥터와 약한
+   * 오프수트 에이스를 구별하지 못했다. 여기서는 169개 클래스마다 0~1 의 가중치를 주고
+   * 경계는 부드럽게 기울인다(혼합 전략). 액션마다 모양이 다르다 — 3벳은 프리미엄에
+   * 수티드 에이스·커넥터 블러프가 섞이고, 콜은 포켓페어와 수티드 손이 앞선다.
+   * 가중치 배열은 RANKED 순서(index)다.
+   */
+  const N_CLASS = RANKED.length;
+
+  function taper(pct, lo, hi, edge) {
+    // [lo+edge, hi-edge] 안은 1, 바깥으로 edge 만큼 기울어 0
+    if (edge <= 0) return (pct >= lo && pct <= hi) ? 1 : 0;
+    if (pct < lo - edge || pct > hi + edge) return 0;
+    let w = 1;
+    // 하한이 0 이면 최강 핸드 쪽에는 경계가 없다 (AA 를 반만 넣으면 안 된다)
+    if (lo > 0 && pct < lo + edge) w = Math.min(w, (pct - (lo - edge)) / (2 * edge));
+    if (pct > hi - edge) w = Math.min(w, ((hi + edge) - pct) / (2 * edge));
+    return Math.max(0, Math.min(1, w));
+  }
+
+  function makeWeights(fn) {
+    const w = new Float32Array(N_CLASS);
+    for (let i = 0; i < N_CLASS; i++) {
+      const info = INFO[RANKED[i][0]];
+      w[i] = Math.max(0, Math.min(1, fn(info)));
+    }
+    return w;
+  }
+
+  /* 클래스 특징 */
+  function gapOf(info) { return info.pair ? 0 : info.hi - info.lo; }
+  function isConnector(info) { return !info.pair && info.suited && gapOf(info) <= 2 && info.hi <= 12 && info.hi >= 5; }
+  function isSuitedAce(info) { return info.suited && info.hi === 14 && info.lo <= 5; }
+  function isSuitedBroadway(info) { return info.suited && !info.pair && info.lo >= 10; }
+  function isOffsuitJunk(info) { return !info.suited && !info.pair && info.lo < 10; }
+
+  /* 밴드에 플레이어빌리티를 얹은 가중치: 수티드는 경계에서 더 자주, 오프수트 잡패는 덜 */
+  function shapedBand(lo, hi, edge) {
+    return makeWeights(function (info) {
+      let pct = info.pct;
+      if (info.suited && !info.pair) pct *= 0.92;
+      else if (isOffsuitJunk(info)) pct *= 1.08;
+      return taper(pct, lo, hi, edge);
+    });
+  }
+
+  const ACTION_WEIGHTS = {
+    any: function () { return makeWeights(function () { return 1; }); },
+    open: function (openPct) { return shapedBand(0, openPct, Math.max(0.02, openPct * 0.18)); },
+    limp: function (openPct) {
+      return shapedBand(openPct * 0.45, Math.min(0.75, openPct * 2.2), 0.05);
+    },
+    /* 오픈에 콜: 포켓페어(세트 마이닝)와 수티드가 앞서고, 오프수트 약한 에이스는 드물다.
+       가장 강한 구간은 3벳으로 빠지지만 가끔 플랫한다. */
+    call: function (openPct) {
+      const lo = openPct * 0.22, hi = Math.min(0.80, openPct * 1.9);
+      return makeWeights(function (info) {
+        if (info.pct < 0.02) return 0.25;
+        let w = taper(info.pct, lo, hi, 0.04);
+        if (info.pair && info.hi <= 10) w = Math.max(w, 1);
+        if (isConnector(info) || isSuitedBroadway(info)) w = Math.max(w, taper(info.pct, 0, hi * 1.15, 0.04));
+        if (!info.suited && !info.pair && info.hi === 14 && info.lo < 12) w *= 0.4;
+        if (isOffsuitJunk(info)) w *= 0.5;
+        return w;
+      });
+    },
+    defendBB: function (openPct) {
+      const lo = openPct * 0.25, hi = Math.min(0.85, openPct * 2.6);
+      return makeWeights(function (info) {
+        if (info.pct < 0.02) return 0.35;
+        let w = taper(info.pct, lo, hi, 0.05);
+        if (info.pair) w = Math.max(w, 1);
+        if (isConnector(info) || info.suited) w = Math.max(w, taper(info.pct, 0, Math.min(0.95, hi * 1.2), 0.05));
+        if (isOffsuitJunk(info)) w *= 0.7;
+        return w;
+      });
+    },
+    /* 3벳: 프리미엄 + 블러프(수티드 에이스 A5s~A2s, 수티드 커넥터) */
+    threeBet: function () {
+      return makeWeights(function (info) {
+        let w = taper(info.pct, 0, 0.065, 0.012);
+        if (isSuitedAce(info)) w = Math.max(w, 0.45);
+        if (isConnector(info) && info.hi >= 8) w = Math.max(w, 0.2);
+        return w;
+      });
+    },
+    fourBet: function () {
+      return makeWeights(function (info) {
+        let w = taper(info.pct, 0, 0.030, 0.008);
+        if (isSuitedAce(info) && info.lo >= 4) w = Math.max(w, 0.3);
+        return w;
+      });
+    },
+    /* 3벳에 콜: 프리미엄 일부(4벳 대신 플랫), 포켓페어, 수티드 브로드웨이 */
+    callThree: function () {
+      return makeWeights(function (info) {
+        if (info.pct < 0.015) return 0.4;
+        let w = taper(info.pct, 0.015, 0.11, 0.02);
+        if (info.pair && info.hi <= 11) w = Math.max(w, 0.9);
+        if (isSuitedBroadway(info)) w = Math.max(w, 0.8);
+        if (!info.suited && !info.pair && info.lo < 12) w *= 0.5;
+        return w;
+      });
+    }
+  };
+
+  /* 가중치의 지지 구간 (호환용 밴드) */
+  function support(weights) {
+    let lo = 1, hi = 0, any = false;
+    for (let i = 0; i < N_CLASS; i++) {
+      if (weights[i] <= 0) continue;
+      const pct = INFO[RANKED[i][0]].pct;
+      if (pct < lo) lo = pct;
+      if (pct > hi) hi = pct;
+      any = true;
+    }
+    return any ? band(lo, hi) : band(0, 0);
+  }
+
+  /* 밴드 -> 가중치 (호환) */
+  function weightsFromBand(b) {
+    return makeWeights(function (info) { return inBand(b, info.pct) ? 1 : 0; });
+  }
+
+  /* 가중치 배열을 곱한다 (프로파일링 보정 등) */
+  function scaleWeights(w, mult) {
+    const out = new Float32Array(N_CLASS);
+    for (let i = 0; i < N_CLASS; i++) out[i] = Math.min(1, w[i] * mult);
+    return out;
+  }
+
   /* 13x13 차트용 격자 (행=높은 랭크, 열=낮은 랭크, 위쪽 삼각형=수딧) */
   function chartGrid() {
     const ranks = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2];
@@ -303,6 +435,13 @@
     inBand: inBand,
     bandWidth: bandWidth,
     classesIn: classesIn,
+    N_CLASS: N_CLASS,
+    ACTION_WEIGHTS: ACTION_WEIGHTS,
+    makeWeights: makeWeights,
+    taper: taper,
+    support: support,
+    weightsFromBand: weightsFromBand,
+    scaleWeights: scaleWeights,
     chartGrid: chartGrid
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
