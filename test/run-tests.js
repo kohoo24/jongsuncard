@@ -793,11 +793,16 @@ test('고급은 상대 평균 VPIP 가 높다고 확인되면 솔버로 전환�
   });
   assert(H.ai.opponentsVpip(ctx) > 0.4);
   eq(H.ai.shouldUseSolver(ctx), true);
-  /* 같은 VPIP 라도 대부분 레이즈로 들어오는 LAG 에게는 전환하지 않는다 */
+  /* 어그레시브 문(기본은 꺼짐)을 켜면 같은 VPIP 라도 대부분 레이즈로 들어오는 LAG 에게는 전환하지 않는다 */
   g.players.forEach(function (p) { if (p !== ctx.player) tracker.data[p.id].pfr = 16; });   // PFR/VPIP 0.8~1.0
-  eq(H.ai.shouldUseSolver(ctx), false, '루즈-어그레시브는 휴리스틱');
-  g.players.forEach(function (p) { if (p !== ctx.player) tracker.data[p.id].pfr = 10; });   // 0.5~0.6
-  eq(H.ai.shouldUseSolver(ctx), true, '루즈-패시브는 솔버');
+  eq(H.ai.shouldUseSolver(ctx), true, '문이 꺼져 있으면 VPIP 만 본다');
+  const savedAgg = H.ai.TUNE.adaptiveAggRatio;
+  H.ai.TUNE.adaptiveAggRatio = 0.78;
+  try {
+    eq(H.ai.shouldUseSolver(ctx), false, '루즈-어그레시브는 휴리스틱');
+    g.players.forEach(function (p) { if (p !== ctx.player) tracker.data[p.id].pfr = 10; });   // 0.5~0.6
+    eq(H.ai.shouldUseSolver(ctx), true, '루즈-패시브는 솔버');
+  } finally { H.ai.TUNE.adaptiveAggRatio = savedAgg; }
   g.players.forEach(function (p) { if (p !== ctx.player) tracker.data[p.id].vpip = 6; });   // 15%
   eq(H.ai.shouldUseSolver(ctx), false, '타이트한 테이블은 휴리스틱');
   const ctxNormal = Object.assign({}, ctx, { diff: H.ai.DIFFICULTY.normal });
@@ -810,9 +815,13 @@ test('루즈 판정 기준은 인원이 많을수록 낮아진다 (9인 LAG 23% 
   assert(t9 > 0.14 && t9 < 0.22, '9인 기준 ' + t9 + ' — TAG 14% 는 아래, LAG 23%·밸런스드 22% 는 위');
   assert(t9 < t4);
   assert(H.ai.adaptiveThreshold(30) >= 0.15, '하한이 있다');
-  const r4 = H.ai.aggRatioThreshold(4), r9 = H.ai.aggRatioThreshold(9);
-  assert(r4 > 0.67 && r4 <= 0.85, '4인 어그레시브 기준 ' + r4 + ' — 밸런스드 0.67 아래, LAG 0.85 위');
-  assert(r9 > 0.65 && r9 <= 0.71, '9인 어그레시브 기준 ' + r9 + ' — 밸런스드 평균 0.65 아래, LAG 0.71~ 위');
+  const savedAgg = H.ai.TUNE.adaptiveAggRatio;
+  H.ai.TUNE.adaptiveAggRatio = 0.78;
+  try {
+    const r4 = H.ai.aggRatioThreshold(4), r9 = H.ai.aggRatioThreshold(9);
+    assert(r4 > 0.67 && r4 <= 0.85, '4인 어그레시브 기준 ' + r4 + ' — 밸런스드 0.67 아래, LAG 0.85 위');
+    assert(r9 > 0.65 && r9 <= 0.71, '9인 어그레시브 기준 ' + r9 + ' — 밸런스드 평균 0.65 아래, LAG 0.71~ 위');
+  } finally { H.ai.TUNE.adaptiveAggRatio = savedAgg; }
 });
 test('C벳 빈도를 센다', function () {
   const g = makeGame(3);
