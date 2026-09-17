@@ -95,6 +95,9 @@
     return {
       type: type.key, icon: type.icon, score: clamp(score, 0, 100), hands: stats.hands,
       loose: loose, aggressive: aggressive,
+      /* 4분면 차트용: 내 좌표와 경계, 탄탄한 범위 */
+      point: { vpip: stats.vpip, ratio: clamp(ratio, 0, 1) },
+      bounds: { vpipHi: R.vpip[1], ratioLo: R.ratio[0], vpipRange: R.vpip, ratioRange: R.ratio },
       rows: rows.map(function (r) { return { key: r.key, value: r.value, lo: r.lo, hi: r.hi, status: r.status, fmt: r.fmt }; }),
       tips: tips
     };

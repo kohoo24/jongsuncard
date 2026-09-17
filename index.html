@@ -22,7 +22,7 @@
       <button class="ghost" id="btnSound" aria-pressed="true" title="소리">&#128266;</button>
       <button class="ghost coach-btn" id="btnCoach" disabled title="생각 정리" aria-pressed="false">&#128161;<span class="txt" data-i18n="coach.btnShort">생각 정리</span></button>
       <button class="ghost" id="btnPanel" aria-expanded="true" data-i18n="top.log">기록</button>
-      <button class="ghost" id="btnMenu" data-i18n="top.newGame">새 게임</button>
+      <button class="ghost" id="btnMenu" data-i18n="top.home">홈</button>
     </div>
   </header>
 
@@ -99,6 +99,42 @@
 
 <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 
+<!-- 홈: 플레이와 교육 -->
+<div class="modal" id="homeModal" role="dialog" aria-modal="true" aria-labelledby="homeTitle">
+  <div class="modal-box wide home-box">
+    <h2 id="homeTitle"><span class="pip">&spades;</span> <span data-i18n="app.title">텍사스 홀덤</span></h2>
+    <p class="sub" data-i18n="app.subtitle"></p>
+    <div class="home-grid">
+      <section class="home-card play" aria-labelledby="homePlayTitle">
+        <h3 id="homePlayTitle" data-i18n="home.play">플레이</h3>
+        <p class="home-desc" data-i18n="home.playDesc"></p>
+        <button class="act gold big" id="btnHomePlay" data-i18n="home.newGame">새 게임</button>
+        <button class="act big" id="btnHomeResume" data-i18n="home.resume" hidden>이어하기</button>
+      </section>
+      <section class="home-card learn" aria-labelledby="homeLearnTitle">
+        <h3 id="homeLearnTitle" data-i18n="home.learn">교육</h3>
+        <p class="home-desc" data-i18n="home.learnDesc"></p>
+        <div class="home-style" id="homeStyle"></div>
+        <button class="act gold big" id="btnHomeDaily"></button>
+        <div class="btn-row home-row">
+          <button class="act" id="btnHomeDrillWeak" data-i18n="home.drillWeak">약점 드릴</button>
+          <button class="act" id="btnHomeDrillAny" data-i18n="home.drillAny">무작위 드릴</button>
+        </div>
+        <button class="act ghost-btn small" id="btnHomeLearn" data-i18n="home.learnStatus">학습 현황</button>
+      </section>
+    </div>
+  </div>
+</div>
+
+<!-- 학습 현황 (홈에서 여는 전체 화면) -->
+<div class="modal" id="learnModal" role="dialog" aria-modal="true" aria-labelledby="learnTitle">
+  <div class="modal-box wide">
+    <h2 id="learnTitle" data-i18n="learn.status">학습 현황</h2>
+    <div id="learnBody" class="scroll-body learn-body"></div>
+    <button class="act big" id="btnLearnClose" data-i18n="common.close">닫기</button>
+  </div>
+</div>
+
 <!-- 설정 -->
 <div class="modal" id="setupModal" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
   <div class="modal-box wide">
@@ -141,6 +177,7 @@
     <button class="act gold big" id="btnStart" data-i18n="setup.start">게임 시작</button>
     <button class="act ghost-btn small" id="btnResume" hidden>이어하기</button>
     <button class="act ghost-btn small" id="btnDrillFromSetup" data-i18n="setup.drill">약점 드릴</button>
+    <button class="act ghost-btn small" id="btnSetupHome" data-i18n="setup.back">← 홈</button>
     <p class="hint" data-i18n="setup.shortcuts"></p>
   </div>
 </div>

@@ -42,6 +42,14 @@ async function dismissModals(page) {
 }
 
 /* 모달을 치운 뒤 클릭한다 */
+/* 첫 화면은 홈 — 설정(새 게임) 화면까지 간다. 게임 종료 뒤 '다시 시작'은 바로 설정으로 온다 */
+async function toSetup(page) {
+  await page.waitForSelector('#homeModal.show, #setupModal.show', { timeout: 10000 });
+  const home = await page.$('#homeModal.show');
+  if (home) await page.click('#btnHomePlay');
+  await page.waitForSelector('#setupModal.show', { timeout: 10000 });
+}
+
 async function safeClick(page, selector) {
   await dismissModals(page);
   await page.click(selector);
@@ -66,7 +74,7 @@ async function restartIfOver(page, seed) {
     await page.waitForSelector('#overModal.show', { timeout: 5000 }).catch(function () {});
   }
   await page.click('#btnOverRestart');
-  await page.waitForSelector('#setupModal.show');
+  await toSetup(page);
   await page.fill('#optSeed', seed);
   await page.click('#btnStart');
   await page.waitForTimeout(600);
@@ -135,7 +143,7 @@ async function playHands(page, target, opts) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   collectErrors(page, errors);
   await page.goto(URL);
-  await page.waitForSelector('#setupModal.show', { timeout: 10000 });
+  await toSetup(page);
 
   await page.selectOption('#optBots', '4');
   await page.selectOption('#optSpeed', '350');
@@ -516,10 +524,10 @@ async function playHands(page, target, opts) {
   await page.waitForTimeout(300);
   const afterQuit = await page.evaluate(function () {
     const m = document.querySelector('.modal.show');
-    return { modal: m ? m.id : null, resume: !document.getElementById('btnResume').hidden, drill: !!window.HoldemUI.drill };
+    return { modal: m ? m.id : null, resume: !document.getElementById('btnHomeResume').hidden, drill: !!window.HoldemUI.drill };
   });
-  check('종료하면 설정 화면으로 돌아가고 이어하기가 보인다', afterQuit.modal === 'setupModal' && afterQuit.resume && !afterQuit.drill, JSON.stringify(afterQuit));
-  await page.click('#btnResume');
+  check('종료하면 홈으로 돌아가고 이어하기가 보인다', afterQuit.modal === 'homeModal' && afterQuit.resume && !afterQuit.drill, JSON.stringify(afterQuit));
+  await page.click('#btnHomeResume');
   await page.waitForTimeout(500);
   const resumedAfterDrill = await page.evaluate(function () {
     return { hand: window.HoldemUI.game.handNo, drill: !!window.HoldemUI.drill };
@@ -593,12 +601,24 @@ async function playHands(page, target, opts) {
   const daily2 = await page.evaluate(function () {
     const p = window.HoldemUI.profile;
     const today = window.Holdem.drill.dateKey();
-    return { rec: p.dailyFor(today), modal: (document.querySelector('.modal.show') || {}).id, toast: !document.getElementById('toast').classList.contains('hidden') };
+    return { rec: p.dailyFor(today), modal: (document.querySelector('.modal.show') || {}).id, toast: !document.getElementById('toast').classList.contains('hidden'),
+      homeDaily: document.getElementById('btnHomeDaily').textContent };
   });
-  check('도중에 끝내도 오늘 기록이 남는다', daily2.rec && daily2.rec.asked === 1 && daily2.modal === 'setupModal', JSON.stringify(daily2));
+  check('도중에 끝내도 오늘 기록이 남고 홈에 표시된다', daily2.rec && daily2.rec.asked === 1 && daily2.modal === 'homeModal' && /1\/1/.test(daily2.homeDaily), JSON.stringify(daily2));
   check('결과 토스트가 뜬다', daily2.toast);
+  /* 홈의 학습 현황: 진단 카드 · 심각도 배지 */
+  await page.click('#btnHomeLearn');
+  await page.waitForTimeout(300);
+  const learnModal = await page.evaluate(function () {
+    const body = document.getElementById('learnBody');
+    return { shown: document.getElementById('learnModal').classList.contains('show'), style: !!body.querySelector('.style-card'),
+      sev: body.querySelectorAll('.sev').length };
+  });
+  check('학습 현황 화면에 진단 카드와 심각도 배지가 있다', learnModal.shown && learnModal.style && learnModal.sev > 0, JSON.stringify(learnModal));
+  await page.click('#btnLearnClose');
+  await page.waitForTimeout(200);
   /* 같은 날 다시 시작하면 같은 첫 문제 */
-  await page.click('#btnResume');
+  await page.click('#btnHomeResume');
   await page.waitForTimeout(400);
   await safeClick(page, '.tab[data-tab="learn"]');
   await page.waitForTimeout(200);
@@ -608,7 +628,7 @@ async function playHands(page, target, opts) {
   check('오늘의 10문제는 다시 시작해도 같은 문제가 나온다', firstHand === secondHand, firstHand + ' vs ' + secondHand);
   await page.click('#btnDrillQuit');
   await page.waitForTimeout(300);
-  await page.click('#btnResume');
+  await page.click('#btnHomeResume');
   await page.waitForTimeout(400);
 
   console.log('\n[저장과 복원]');
@@ -622,7 +642,7 @@ async function playHands(page, target, opts) {
     };
   });
   await page.reload();
-  await page.waitForSelector('#setupModal.show');
+  await toSetup(page);
   const hasResume = await page.evaluate(function () { return !document.getElementById('btnResume').hidden; });
   check('이어하기 버튼이 나타난다', hasResume);
   if (hasResume) {
@@ -644,7 +664,7 @@ async function playHands(page, target, opts) {
 
   console.log('\n[언어 전환]');
   await safeClick(page, '#btnMenu');
-  await page.waitForSelector('#setupModal.show');
+  await toSetup(page);
   await page.selectOption('#optLang', 'en');
   await page.waitForTimeout(200);
   const enLabel = await page.evaluate(function () {
@@ -743,7 +763,7 @@ async function playHands(page, target, opts) {
     const e9 = [];
     collectErrors(p9, e9);
     await p9.goto(URL);
-    await p9.waitForSelector('#setupModal.show');
+    await toSetup(p9);
     const optMax = await p9.$$eval('#optBots option', function (os) { return Math.max.apply(null, os.map(function (o) { return parseInt(o.value, 10); })); });
     check('상대를 8명까지 고를 수 있다', optMax === 8, String(optMax));
     await p9.selectOption('#optBots', '8');
@@ -791,7 +811,7 @@ async function playHands(page, target, opts) {
     const mErr = [];
     collectErrors(mp, mErr);
     await mp.goto(URL);
-    await mp.waitForSelector('#setupModal.show');
+    await toSetup(mp);
     await mp.selectOption('#optBots', String(bots));
     await mp.selectOption('#optSpeed', '350');
     await mp.selectOption('#optChips', '5000');
@@ -842,7 +862,7 @@ async function playHands(page, target, opts) {
     const m = await browser.newPage({ viewport: vp, isMobile: true, hasTouch: true });
     collectErrors(m, mErrors);
     await m.goto(URL);
-    await m.waitForSelector('#setupModal.show');
+    await toSetup(m);
     await m.selectOption('#optBots', '3');
     await m.selectOption('#optSpeed', '350');
     await m.click('#btnStart');

@@ -105,11 +105,12 @@
     this.updated = Date.now();
   };
 
-  function row(key, b) {
+  function row(key, b, hands) {
     return {
       key: key,
       n: b.n, loss: b.loss, mistakes: b.mistakes,
       avg: b.n ? b.loss / b.n : 0,
+      bb100: hands ? b.loss / hands * 100 : 0,      // 이 자리에서 100핸드당 잃는 bb
       mistakeRate: b.n ? b.mistakes / b.n : 0,
       drillN: b.drillN || 0,
       drillAvg: b.drillN ? b.drillLoss / b.drillN : null
@@ -119,12 +120,12 @@
   /** 자리별 표 (고정 순서, 기록 없는 자리도 포함) */
   Profile.prototype.table = function () {
     const self = this;
-    return allKeys().map(function (k) { return row(k, self.cats[k] || emptyBucket()); });
+    return allKeys().map(function (k) { return row(k, self.cats[k] || emptyBucket(), self.hands); });
   };
 
   Profile.prototype.byPosition = function () {
     const self = this;
-    return POSITIONS.map(function (p) { return row(p, self.pos[p] || emptyBucket()); });
+    return POSITIONS.map(function (p) { return row(p, self.pos[p] || emptyBucket(), self.hands); });
   };
 
   /**
@@ -197,8 +198,14 @@
     return new Profile(null);
   }
 
+  /* 리크 심각도: 결정당 평균 손실(bb). 리뷰의 '실수' 경계(0.6)와 '무난' 경계(0.15)의 중간을 주의로 */
+  function severity(avg) {
+    return avg >= 0.6 ? 'critical' : avg >= 0.3 ? 'warn' : 'ok';
+  }
+
   H.profile = {
     Profile: Profile,
+    severity: severity,
     STREETS: STREETS,
     SPOTS: SPOTS,
     POSITIONS: POSITIONS,

@@ -1522,8 +1522,50 @@
     });
     hide($('waiting'), false);
     $('waiting').textContent = '';
+    openHome();
+  }
+
+  /* ==================== 홈 (플레이 / 교육) ==================== */
+  function openHome() {
     buildSetup();
-    openModal('setupModal');
+    closeModal('setupModal');
+    closeModal('learnModal');
+    $('btnHomeResume').hidden = !H.storage.loadSession();
+    const today = H.drill.dateKey();
+    const rec = state.profile ? state.profile.dailyFor(today) : null;
+    $('btnHomeDaily').textContent = rec
+      ? T('home.dailyDone', { correct: rec.correct, asked: rec.asked })
+      : T('home.dailyTodo');
+    $('btnHomeDrillWeak').disabled = !(state.profile && state.profile.drillTarget());
+    const st = state.profile && state.profile.lastStyle;
+    const line = $('homeStyle');
+    line.textContent = st
+      ? T('home.styleLine', { icon: st.icon, type: T('style.type.' + st.type), score: st.score })
+      : T('home.noStyle');
+    line.classList.toggle('muted', !st);
+    openModal('homeModal');
+  }
+  function openLearnModal() {
+    closeModal('homeModal');
+    H.panels.renderLearn(state.profile, $('learnBody'), {
+      onDrill: function (t) { closeModal('learnModal'); startDrill(t); },
+      onDaily: function () { closeModal('learnModal'); startDaily(); },
+      onReset: function () { resetProfile(); openLearnModal(); }
+    });
+    openModal('learnModal');
+  }
+
+  /* 가로 폰·태블릿에서는 옆 패널이 테이블 옆에 붙는다 (CSS 와 같은 조건) */
+  const DOCK_MQ = '(orientation: landscape) and (max-height: 640px) and (min-width: 800px)';
+  function panelDocked() {
+    try { return global.matchMedia(DOCK_MQ).matches; } catch (e) { return false; }
+  }
+  function setPanelOpen(open) {
+    const p = $('sidePanel');
+    p.classList.toggle('hidden', !open);
+    $('btnPanel').setAttribute('aria-expanded', String(open));
+    refreshPanel();
+    if (state.game) { state.feltLayoutSig = ''; layoutSeats(true); positionDeck(true); }
   }
 
   let toastTimer = null;
@@ -1857,9 +1899,26 @@
     });
     $('btnMenu').addEventListener('click', function () {
       clearTimer(); stopClockTick();
+      openHome();
+    });
+    $('btnHomePlay').addEventListener('click', function () {
+      closeModal('homeModal');
       buildSetup();
       openModal('setupModal');
     });
+    $('btnHomeResume').addEventListener('click', function () {
+      closeModal('homeModal');
+      if (!resumeSession()) { buildSetup(); openModal('setupModal'); }
+    });
+    $('btnHomeDaily').addEventListener('click', function () { closeModal('homeModal'); startDaily(); });
+    $('btnHomeDrillWeak').addEventListener('click', function () {
+      closeModal('homeModal');
+      startDrill(state.profile ? state.profile.drillTarget() : null);
+    });
+    $('btnHomeDrillAny').addEventListener('click', function () { closeModal('homeModal'); startDrill(null); });
+    $('btnHomeLearn').addEventListener('click', openLearnModal);
+    $('btnLearnClose').addEventListener('click', function () { closeModal('learnModal'); openHome(); });
+    $('btnSetupHome').addEventListener('click', function () { closeModal('setupModal'); openHome(); });
     $('btnOverRestart').addEventListener('click', function () {
       closeModal('overModal');
       buildSetup();
@@ -1872,11 +1931,14 @@
       loop();
     });
     $('btnPanel').addEventListener('click', function () {
-      const p = $('sidePanel');
-      p.classList.toggle('hidden');
-      $('btnPanel').setAttribute('aria-expanded', String(!p.classList.contains('hidden')));
-      refreshPanel();
+      setPanelOpen($('sidePanel').classList.contains('hidden'));
     });
+    /* 가로 ↔ 세로: 붙은 패널은 가로에서 기본으로 열고, 세로로 돌아가면 서랍이 테이블을 가리지 않게 닫는다 */
+    try {
+      const mq = global.matchMedia(DOCK_MQ);
+      const onDock = function (e) { if (global.innerWidth < 980) setPanelOpen(e.matches); };
+      if (mq.addEventListener) mq.addEventListener('change', onDock); else if (mq.addListener) mq.addListener(onDock);
+    } catch (e) { /* matchMedia 없는 환경 */ }
     $('btnUnit').addEventListener('click', toggleUnit);
     $('btnSound').addEventListener('click', function () {
       state.sound = !state.sound;
@@ -2009,10 +2071,10 @@
     H.format.setUnit(state.settings.unit);
     H.i18n.setLang(state.settings.lang);
     bind();
-    if (global.innerWidth < 980) $('sidePanel').classList.add('hidden');
+    if (global.innerWidth < 980 && !panelDocked()) $('sidePanel').classList.add('hidden');
+    $('btnPanel').setAttribute('aria-expanded', String(!$('sidePanel').classList.contains('hidden')));
     switchTab('log');
-    buildSetup();
-    openModal('setupModal');
+    openHome();
     if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
       navigator.serviceWorker.register('sw.js').catch(function () { /* 오프라인 지원 실패는 무시 */ });
     }

@@ -993,3 +993,47 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .card, .fly-chip, .seat .avatar, .deck { animation: none !important; transition: none !important; }
 }
+
+/* ---------- 홈 (플레이 / 교육) ---------- */
+.home-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
+.home-card {
+  background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .09); border-radius: 12px;
+  padding: 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.home-card.play { border-color: rgba(227, 185, 90, .35); }
+.home-card h3 { margin: 0; font-size: 16px; }
+.home-card .home-desc { margin: 0 0 4px; color: var(--muted); font-size: 12px; }
+.home-card .act.big { width: 100%; margin: 0; }
+.home-card .home-row { margin: 0; }
+.home-card .home-row .act { flex: 1; }
+.home-style { font-size: 12px; color: var(--text); min-height: 16px; }
+.home-style.muted { color: var(--muted); }
+.learn-body { max-height: 70vh; }
+@media (max-width: 560px) { .home-grid { grid-template-columns: 1fr; } }
+
+/* 4분면 스타일 차트 */
+.style-quad { display: block; width: 100%; height: auto; margin: 6px 0 4px; }
+.style-quad .q-bg { fill: rgba(255, 255, 255, .04); }
+.style-quad .q-line { stroke: rgba(255, 255, 255, .22); stroke-width: 1; }
+.style-quad .q-zone { fill: rgba(90, 200, 140, .28); stroke: rgba(90, 200, 140, .6); stroke-width: 1; }
+.style-quad .q-label { fill: var(--muted); font-size: 10px; }
+.style-quad .q-label.on { fill: var(--text); font-weight: 700; }
+.style-quad .q-axis { fill: var(--muted); font-size: 9px; }
+.style-quad .q-dot { fill: var(--gold); stroke: #0b1f16; stroke-width: 2; }
+.style-quad .q-you { fill: var(--gold); font-size: 10px; font-weight: 700; }
+
+/* 리크 심각도 */
+.sev { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; line-height: 1.5; white-space: nowrap; }
+.sev.critical { background: rgba(255, 110, 90, .2); color: #ff9b8a; }
+.sev.warn { background: rgba(227, 185, 90, .18); color: var(--gold); }
+.sev.ok { background: rgba(90, 200, 140, .18); color: var(--green); }
+.weak-card .wk-bb { color: var(--muted); font-size: 10.5px; white-space: nowrap; }
+.learn-table td.sev-col { padding-left: 4px; }
+
+/* 가로 폰·태블릿: 옆 패널을 서랍이 아니라 테이블 옆에 붙인다 (폭 800px 이상, 높이 640px 이하) */
+@media (orientation: landscape) and (max-height: 640px) and (min-width: 800px) {
+  .side { position: static; width: 220px; height: auto; top: auto; bottom: auto; right: auto; box-shadow: none; background: var(--panel-soft); }
+  .stage { gap: 8px; }
+  .tab { font-size: 11px; padding: 7px 2px; }
+  .tab-body { padding: 8px 9px; }
+}

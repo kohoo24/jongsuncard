@@ -2018,5 +2018,22 @@ test('오늘의 10문제는 날짜로 시드가 고정되고 10문제에서 끝�
   eq(H.profile.create(JSON.parse(JSON.stringify(p2.toJSON()))).lastStyle.type, 'tag');
 });
 
+test('리크 심각도와 자리별 bb/100', function () {
+  eq(H.profile.severity(0.8), 'critical'); eq(H.profile.severity(0.4), 'warn'); eq(H.profile.severity(0.1), 'ok');
+  const p = H.profile.create();
+  const mk = function (loss) { return { street: 'flop', spot: 'vsBet', position: 'BB', evLossBb: loss, verdict: loss >= 0.6 ? 'mistake' : 'good', cards: [], board: [], chosen: {}, best: {} }; };
+  for (let i = 0; i < 10; i++) p.addHand([mk(i < 5 ? 1 : 0)]);   // 10핸드, 이 자리 손실 5bb
+  const r = p.table().filter(function (x) { return x.key === 'flop/vsBet'; })[0];
+  eq(r.n, 10);
+  assert(Math.abs(r.bb100 - 50) < 1e-9, '10핸드에 5bb → 50 bb/100, 실제 ' + r.bb100);
+  eq(H.profile.severity(r.avg), 'warn');
+});
+test('스타일 진단은 4분면 차트 좌표와 경계를 준다', function () {
+  const d = H.style.diagnose({ hands: 40, vpip: 0.45, pfr: 0.1, af: 0.8, foldToBet: 0.3, wtsd: 0.3, threeBet: 0.05, samples: { facedBet: 10, showdown: 5, threeBetOpp: 10 } }, 6);
+  assert(d.point && Math.abs(d.point.vpip - 0.45) < 1e-9 && Math.abs(d.point.ratio - 0.1 / 0.45) < 1e-9);
+  assert(d.bounds && d.bounds.vpipHi > 0 && d.bounds.ratioLo > 0 && d.bounds.vpipRange.length === 2);
+  assert(d.point.vpip > d.bounds.vpipHi && d.point.ratio < d.bounds.ratioLo, '루즈-패시브 사분면');
+});
+
 console.log('\n결과: ' + passed + ' 통과, ' + failed + ' 실패\n');
 process.exit(failed ? 1 : 0);

@@ -437,6 +437,13 @@
 
   function bbText(v) { return T('learn.avgBb', { avg: v.toFixed(2) }); }
 
+  /* 리크 심각도 배지 — 색과 글자 둘 다 (색만으로 구분하지 않는다) */
+  function sevBadge(avg) {
+    const sev = H.profile.severity(avg);
+    return el('span', 'sev ' + sev, T('learn.severity.' + sev));
+  }
+  H.panels.sevBadge = sevBadge;
+
   function drillButton(key, onDrill) {
     const b = el('button', 'mini-btn', T('learn.drillThis'));
     b.type = 'button';
@@ -487,8 +494,12 @@
       host.appendChild(el('h4', 'panel-sub', T('learn.weakest')));
       weak.forEach(function (r) {
         const card = el('div', 'weak-card');
+        card.appendChild(sevBadge(r.avg));
         card.appendChild(el('span', 'wk-name', spotLabel(r.key)));
         card.appendChild(el('span', 'wk-avg', bbText(r.avg)));
+        const bb = el('span', 'wk-bb', T('learn.bb100', { bb: '-' + r.bb100.toFixed(1) }));
+        bb.title = T('learn.bb100Hint');
+        card.appendChild(bb);
         if (r.drillN) {
           card.appendChild(el('span', 'wk-drill', T('learn.drillAvg', { n: r.drillN, avg: r.drillAvg.toFixed(2) })));
         }
@@ -506,8 +517,12 @@
       const thead = el('thead');
       const hr = el('tr');
       hr.appendChild(el('th', 'spot-col', ''));
+      hr.appendChild(el('th', null, ''));
       hr.appendChild(el('th', null, T('learn.colN')));
       hr.appendChild(el('th', null, T('learn.colAvg')));
+      const bbTh = el('th', null, T('learn.colBb100'));
+      bbTh.title = T('learn.bb100Hint');
+      hr.appendChild(bbTh);
       hr.appendChild(el('th', null, T('learn.colMistakes')));
       if (withDrill) hr.appendChild(el('th', null, ''));
       thead.appendChild(hr);
@@ -516,10 +531,14 @@
       rows.forEach(function (r) {
         const tr = el('tr');
         tr.appendChild(el('td', 'spot-col', withDrill ? spotLabel(r.key) : T('pos.' + r.key)));
+        const sevTd = el('td', 'sev-col');
+        sevTd.appendChild(sevBadge(r.avg));
+        tr.appendChild(sevTd);
         tr.appendChild(el('td', null, String(r.n)));
         const avg = el('td', r.avg > 0.6 ? 'neg' : r.avg < 0.15 ? 'pos' : null, r.avg.toFixed(2));
         if (r.drillN) avg.title = T('learn.drillAvg', { n: r.drillN, avg: r.drillAvg.toFixed(2) });
         tr.appendChild(avg);
+        tr.appendChild(el('td', r.bb100 >= 3 ? 'neg' : null, '-' + r.bb100.toFixed(1)));
         tr.appendChild(el('td', null, Math.round(r.mistakeRate * 100) + '%'));
         if (withDrill) {
           const td = el('td', 'drill-col');
@@ -659,6 +678,61 @@
 
   /* ==================== 플레이 스타일 진단 ==================== */
   function fmtStat(v, fmt) { return fmt === 'pct' ? Math.round(v * 100) + '%' : v.toFixed(1); }
+
+  /*
+   * 4분면 차트: 가로 VPIP(타이트 → 루즈), 세로 공격성(PFR/VPIP, 패시브 → 어그레시브).
+   * 경계선이 네 유형을 가르고, 탄탄한 범위는 초록 상자, 나는 금색 점. 한 점짜리 산점도라
+   * 범례 대신 사분면 이름을 직접 적는다.
+   */
+  function quadrantChart(diag) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const W = 260, Hh = 150, L = 34, R = 8, Tp = 8, B = 22;
+    const pw = W - L - R, ph = Hh - Tp - B;
+    const maxV = Math.max(0.6, Math.min(0.9, diag.bounds.vpipHi * 2));   // 축 끝: 루즈 경계의 두 배
+    const x = function (v) { return L + Math.min(1, v / maxV) * pw; };
+    const y = function (r) { return Tp + (1 - Math.min(1, r)) * ph; };
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + Hh);
+    svg.setAttribute('class', 'style-quad');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', T('style.type.' + diag.type) + ' · VPIP ' + Math.round(diag.point.vpip * 100) + '%');
+    const add = function (tag, attrs, text) {
+      const n = document.createElementNS(NS, tag);
+      Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+      if (text != null) n.textContent = text;
+      svg.appendChild(n);
+      return n;
+    };
+    add('rect', { x: L, y: Tp, width: pw, height: ph, rx: 6, 'class': 'q-bg' });
+    const bx = x(diag.bounds.vpipHi), by = y(diag.bounds.ratioLo);
+    add('line', { x1: bx, y1: Tp, x2: bx, y2: Tp + ph, 'class': 'q-line' });
+    add('line', { x1: L, y1: by, x2: L + pw, y2: by, 'class': 'q-line' });
+    /* 탄탄한 범위 */
+    const vr = diag.bounds.vpipRange, rr = diag.bounds.ratioRange;
+    add('rect', { x: x(vr[0]), y: y(rr[1]), width: x(vr[1]) - x(vr[0]), height: y(rr[0]) - y(rr[1]), rx: 3, 'class': 'q-zone' });
+    add('text', { x: x(vr[1]) + 3, y: y(rr[1]) + 9, 'class': 'q-axis' }, T('style.target'));
+    /* 사분면 이름 */
+    const quads = [
+      { key: 'tag', x: L + 6, y: Tp + 12, anchor: 'start' },
+      { key: 'lag', x: L + pw - 6, y: Tp + 12, anchor: 'end' },
+      { key: 'rock', x: L + 6, y: Tp + ph - 5, anchor: 'start' },
+      { key: 'fish', x: L + pw - 6, y: Tp + ph - 5, anchor: 'end' }
+    ];
+    quads.forEach(function (q) {
+      add('text', { x: q.x, y: q.y, 'text-anchor': q.anchor, 'class': 'q-label' + (q.key === diag.type ? ' on' : '') },
+        H.style.TYPES[q.key].icon + ' ' + T('style.short.' + q.key));
+    });
+    /* 축 */
+    add('text', { x: L, y: Hh - 6, 'text-anchor': 'start', 'class': 'q-axis' }, T('style.axisVpip'));
+    add('text', { x: 10, y: Tp + ph / 2, 'text-anchor': 'middle', 'class': 'q-axis', transform: 'rotate(-90 10 ' + (Tp + ph / 2) + ')' }, T('style.axisAgg'));
+    add('text', { x: bx, y: Hh - 6, 'text-anchor': 'middle', 'class': 'q-axis' }, Math.round(diag.bounds.vpipHi * 100) + '%');
+    /* 나 */
+    const px = x(diag.point.vpip), py = y(diag.point.ratio);
+    add('circle', { cx: px, cy: py, r: 6, 'class': 'q-dot' });
+    add('text', { x: px + (px > L + pw - 30 ? -9 : 9), y: py + 4, 'text-anchor': px > L + pw - 30 ? 'end' : 'start', 'class': 'q-you' }, T('style.you'));
+    return svg;
+  }
+  H.panels.quadrantChart = quadrantChart;
   H.panels.renderStyle = function (diag, host, opts) {
     opts = opts || {};
     const card = el('div', 'style-card');
@@ -680,6 +754,7 @@
     head.appendChild(score);
     card.appendChild(head);
     card.appendChild(el('div', 'style-meta', (opts.saved ? T('style.saved') + ' · ' : '') + T('style.hands', { n: diag.hands })));
+    if (diag.point && diag.bounds) card.appendChild(quadrantChart(diag));
 
     /* 지표 막대: 기준 범위를 띠로, 내 값을 점으로 */
     const rows = el('div', 'style-rows');
