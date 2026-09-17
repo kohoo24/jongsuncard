@@ -984,6 +984,18 @@ async function playHands(page, target, opts) {
     await lp.click('#btnStart'); await lp.waitForTimeout(400);
     const hint4 = await lp.evaluate(function () { return !document.getElementById('rotateHint').classList.contains('hidden'); });
     check('가로 폰에서는 안내가 뜨지 않는다', !hint4);
+    /* 내 차례 ↔ 상대 차례에 펠트 크기가 같아야 좌석·카드가 움직이지 않는다 */
+    const feltH = async function () { return lp.evaluate(function () { return Math.round(document.getElementById('felt').getBoundingClientRect().height); }); };
+    const sizes = { hero: null, other: null };
+    const until = Date.now() + 20000;
+    while (Date.now() < until && (sizes.hero == null || sizes.other == null)) {
+      const st = await lp.evaluate(function () { const g = window.HoldemUI.game; return { phase: g.phase, hero: !!(g.currentActor() && g.currentActor().isHuman) }; });
+      if (st.phase === 'awaiting-action' && st.hero) { sizes.hero = await feltH(); await lp.click('#btnCall'); }
+      else if (st.phase === 'awaiting-action') { sizes.other = await feltH(); }
+      else if (st.phase === 'hand-over') await lp.click('#btnNext');
+      await lp.waitForTimeout(120);
+    }
+    check('가로 폰: 내 차례와 상대 차례의 펠트 높이가 같다 (테이블이 움직이지 않는다)', sizes.hero != null && sizes.hero === sizes.other, JSON.stringify(sizes));
     await lp.close();
   }
 

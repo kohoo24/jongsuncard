@@ -366,7 +366,7 @@ npm run bench      # AI 강도 벤치마크 (TAG 봇 상대 4인, 6시드 × 100
 npm run bench:9    # 같은 벤치마크 9인 풀링 (6시드 × 500핸드, 약 50초)
 npm run solve      # 프리플랍 솔버 테이블 재생성 (약 1분)
 npm run lint       # ESLint
-npm run test:e2e   # 브라우저 E2E 155개 (Playwright 필요)
+npm run test:e2e   # 브라우저 E2E 156개 (Playwright 필요)
 npm run test:sw    # 서비스 워커 갱신 7개 (Playwright 필요)
 ```
 

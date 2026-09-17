@@ -850,6 +850,30 @@
   /* ==================== 컨트롤 ==================== */
   function hide(el, v) { el.classList.toggle('hidden', !!v); }
 
+  /*
+   * 액션 영역의 높이를 고정한다. 내 차례에 버튼 줄이 나타나면 컨트롤이 커지고 펠트가 줄어
+   * 좌석·카드가 통째로 움직였다(가로 폰에서 42px). 버튼 줄이 보일 때의 높이를 재서 min-height 로
+   * 잡아 두면 상대 차례에도 펠트 크기가 같다. 화면 크기와 접힘 여부가 바뀌면 다시 잰다.
+   */
+  function reserveActionHeight() {
+    const area = document.querySelector('.action-area');
+    if (!area) return;
+    const sig = global.innerWidth + 'x' + global.innerHeight + ':' + (betCollapsible() ? 'c' : 'f');
+    if (state.actionSig !== sig) {
+      state.actionSig = sig;
+      /* 버튼 줄(+ 펼친 베팅 줄)을 보이지 않게 잠깐 펼쳐 자연 높이를 잰다 */
+      const rows = [$('btnRow')].concat(betCollapsible() ? [] : [$('raiseRow')]);
+      const others = ['showRow', 'addonRow', 'nextRow', 'drillRow', 'drillHint', 'coachBox', 'waiting'].map(function (id) { return $(id); });
+      const saved = rows.concat(others).map(function (e) { return { e: e, hidden: e.classList.contains('hidden'), vis: e.style.visibility }; });
+      others.forEach(function (e) { e.classList.add('hidden'); });
+      rows.forEach(function (e) { e.classList.remove('hidden'); e.style.visibility = 'hidden'; });
+      area.style.minHeight = '';
+      state.actionH = area.offsetHeight;
+      saved.forEach(function (x) { x.e.classList.toggle('hidden', x.hidden); x.e.style.visibility = x.vis; });
+    }
+    area.style.minHeight = state.actionH ? state.actionH + 'px' : '';
+  }
+
   function updateControls() {
     if (state.drill) { updateDrillControls(); return; }
     hide($('drillRow'), true);
@@ -874,6 +898,7 @@
     hide($('btnReview'), !state.lastSummary || !state.lastSummary.items.length);
 
     if (handOver) showBanner(); else $('resultBanner').classList.remove('show');
+    reserveActionHeight();
 
     if (!isHeroTurn) {
       if (!handOver && !showChoice) {
@@ -1512,6 +1537,7 @@
     hide($('drillFeedback'), !answered);
     hide($('btnDrillNext'), !answered);
     $('resultBanner').classList.remove('show');
+    reserveActionHeight();
     if (isHeroTurn) {
       const spot = d.current.spot;
       const hint = $('drillHint');
