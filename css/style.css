@@ -1235,3 +1235,46 @@ button.act.gold.confirm { background: linear-gradient(180deg, #5a2a26, #3f1c19);
 .goal { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 5px 8px; border-radius: 8px; background: rgba(0, 0, 0, .18); }
 .goal.done { color: var(--success); }
 .goal .g-val { font-weight: 700; }
+
+/* ---------- iOS 최적화 ----------
+ * 1) 모달 높이: iOS Safari 의 100vh 는 주소창이 접힌 큰 뷰포트라 모달 아래가 툴바 뒤로 잘린다 → dvh
+ * 2) 노치·홈 인디케이터: 가로에서 좌우 인셋, 떠 있는 요소(토스트 · 안내 · 서랍)에 인셋 반영
+ * 3) 입력 확대: iOS 는 글자가 16px 보다 작은 입력에 포커스하면 화면을 확대해 버린다 → 터치 기기만 16px
+ * 4) 두 번 탭 확대 · 탭 하이라이트 · 길게 눌러 선택/복사 메뉴 막기, 터치 기기에서 hover 잔상 제거
+ * 5) 고무줄 스크롤(overscroll) 막기 */
+html, body { overscroll-behavior: none; }
+#app {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+.modal { padding: calc(20px + env(safe-area-inset-top, 0px)) calc(20px + env(safe-area-inset-right, 0px)) calc(20px + env(safe-area-inset-bottom, 0px)) calc(20px + env(safe-area-inset-left, 0px)); }
+.toast { bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+.rotate-hint { top: calc(52px + env(safe-area-inset-top, 0px)); }
+@media (max-width: 1080px) {
+  .side { right: calc(12px + env(safe-area-inset-right, 0px)); top: calc(56px + env(safe-area-inset-top, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (orientation: landscape) and (max-height: 640px) and (min-width: 800px) {
+  .side { right: auto; top: auto; bottom: auto; }
+}
+@supports (height: 100dvh) {
+  .modal-box { max-height: calc(100dvh - 40px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); }
+  .scroll-body { max-height: 56dvh; }
+  .learn-body { max-height: 70dvh; }
+}
+button, [role="tab"], .seat, .card, .felt, input[type="range"], .presets button, .modal-x {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.felt, .seat, .card, .board, .pot, .topbar, .controls { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+@media (hover: none) {
+  button.act:hover:not(:disabled) { filter: none; }
+  button.ghost:hover { background: rgba(255, 255, 255, .07); }
+  .hist-row:hover { background: transparent; }
+  .mini-btn:hover { background: rgba(255, 255, 255, .08); }
+  .presets button:hover { background: rgba(255, 255, 255, .07); }
+  .modal-x:hover { background: rgba(255, 255, 255, .06); color: var(--text-2); }
+}
+@media (pointer: coarse) {
+  .field select, .field input[type="text"], #raiseInput { font-size: 16px; }
+  #raiseInput { width: 108px; }
+}

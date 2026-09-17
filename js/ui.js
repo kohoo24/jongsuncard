@@ -79,6 +79,8 @@
     if (!state.sound) return;
     try {
       if (!audioCtx) audioCtx = new (global.AudioContext || global.webkitAudioContext)();
+      /* iOS 는 컨텍스트를 멈춘 채로 만들고, 화면을 껐다 켜면 다시 멈춘다 — 매번 깨운다 */
+      if (audioCtx.state === 'suspended' && audioCtx.resume) audioCtx.resume().catch(function () {});
       const t = audioCtx.currentTime;
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
@@ -102,6 +104,14 @@
     lose: function () { tone(300, 0.2, 0.04, 'sine'); },
     tick: function () { tone(1200, 0.03, 0.02); }
   };
+  /* iOS 는 사용자 터치 안에서 만든 오디오 컨텍스트만 소리를 낸다 — 첫 터치에서 만들어 깨워 둔다 */
+  function unlockAudio() {
+    if (!state.sound) return;
+    try {
+      if (!audioCtx) audioCtx = new (global.AudioContext || global.webkitAudioContext)();
+      if (audioCtx.state === 'suspended' && audioCtx.resume) audioCtx.resume().catch(function () {});
+    } catch (e) { /* 오디오 미지원 */ }
+  }
   function buzz(ms) {
     try { if (global.navigator && navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* 무시 */ }
   }
@@ -2318,6 +2328,8 @@
     });
 
     global.addEventListener('beforeunload', saveSession);
+    document.addEventListener('pointerdown', unlockAudio, { passive: true });
+    document.addEventListener('touchend', unlockAudio, { passive: true });
     H.i18n.onChange(function () { applyI18nText(); if (state.game) render(); });
   }
 
