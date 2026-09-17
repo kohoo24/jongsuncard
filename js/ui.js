@@ -1611,6 +1611,20 @@
     const desc = $('homeInstallDesc'), btn = $('btnInstall'), steps = $('homeInstallSteps');
     if (isStandalone() || installed) { card.classList.add('hidden'); return; }
     card.classList.remove('hidden');
+    const anyway = $('btnInstallAnyway');
+    const kind = browserKind();
+    if (kind === 'samsung') {
+      /* 삼성 인터넷이 만드는 껍데기 앱은 Android 14+ 에서 "이전 버전용" 경고가 뜬다 (삼성 서버 문제).
+       * Chrome 으로 열어 설치하도록 안내하고, 그래도 원하면 설치 이벤트를 쓴다. */
+      desc.textContent = T('home.installSamsungDesc');
+      btn.textContent = T('home.installSamsungBtn');
+      renderInstallSteps(steps, INSTALL_STEPS.samsung);
+      steps.classList.remove('hidden');
+      anyway.hidden = !installPrompt;
+      card.dataset.kind = 'samsung';
+      return;
+    }
+    anyway.hidden = true;
     if (installPrompt) {
       /* 브라우저가 설치 이벤트를 줬다 — 버튼 한 번으로 바로 설치 */
       desc.textContent = T('home.installDesc');
@@ -1620,37 +1634,61 @@
       return;
     }
     /* 이벤트가 없다(iPhone · 앱 안 브라우저 · 이미 설치됨 · 아직 안 옴) — 환경별 설치 방법을 안내 */
-    const kind = browserKind();
     desc.textContent = T(kind === 'ios' ? 'home.installIosDesc' : kind === 'inapp' ? 'home.installInappDesc' : 'home.installManualDesc');
     btn.textContent = steps.classList.contains('hidden') ? T('home.installIosBtn') : T('home.installIosHide');
     card.dataset.kind = kind;
   }
+  function renderInstallSteps(steps, keys) {
+    steps.innerHTML = '';
+    keys.forEach(function (k) {
+      const li = document.createElement('li'); li.textContent = T(k); steps.appendChild(li);
+    });
+  }
+  /* Chrome 으로 이 페이지를 연다 (Android intent). Chrome 이 없으면 Play 스토어의 Chrome 으로 간다. */
+  function chromeIntentUrl(loc) {
+    return 'intent://' + loc.host + loc.pathname + loc.search +
+      '#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=' +
+      encodeURIComponent('https://play.google.com/store/apps/details?id=com.android.chrome') + ';end';
+  }
+  function runInstallPrompt() {
+    const p = installPrompt;
+    p.prompt();
+    const done = function (choice) {
+      if (choice && choice.outcome === 'accepted') { installPrompt = null; installed = true; toast(T('home.installed')); }
+      else toast(T('home.installDismissed'));
+      updateInstallCard();
+    };
+    if (p.userChoice && p.userChoice.then) p.userChoice.then(done, function () { done(null); });
+    else done(null);
+  }
   function onInstallClick() {
     const card = $('homeInstall');
+    if (card.dataset.kind === 'samsung') {
+      const loc = global.location;
+      const copy = (global.navigator.clipboard && global.navigator.clipboard.writeText)
+        ? global.navigator.clipboard.writeText(loc.href).catch(function () {}) : Promise.resolve();
+      copy.then(function () { toast(T('home.installCopied')); });
+      if (state.openExternal) state.openExternal(chromeIntentUrl(loc));
+      else loc.href = chromeIntentUrl(loc);
+      return;
+    }
     if (card.dataset.kind === 'prompt' && installPrompt) {
-      const p = installPrompt;
-      p.prompt();
-      const done = function (choice) {
-        if (choice && choice.outcome === 'accepted') { installPrompt = null; installed = true; toast(T('home.installed')); }
-        else toast(T('home.installDismissed'));
-        updateInstallCard();
-      };
-      if (p.userChoice && p.userChoice.then) p.userChoice.then(done, function () { done(null); });
-      else done(null);
+      runInstallPrompt();
       return;
     }
     const steps = $('homeInstallSteps');
     if (steps.classList.contains('hidden')) {
-      steps.innerHTML = '';
-      (INSTALL_STEPS[card.dataset.kind] || INSTALL_STEPS.desktop).forEach(function (k) {
-        const li = document.createElement('li'); li.textContent = T(k); steps.appendChild(li);
-      });
+      renderInstallSteps(steps, INSTALL_STEPS[card.dataset.kind] || INSTALL_STEPS.desktop);
       steps.classList.remove('hidden');
     } else steps.classList.add('hidden');
     updateInstallCard();
   }
+  function onInstallAnywayClick() {
+    if (installPrompt) runInstallPrompt();
+  }
   /* 테스트·다른 모듈에서 설치 이벤트를 흉내 낼 수 있게 노출 */
   state.setInstallPrompt = function (ev) { installPrompt = ev; updateInstallCard(); };
+  state.chromeIntentUrl = chromeIntentUrl;
 
   /* ==================== 홈 (플레이 / 교육) ==================== */
   function openHome() {
@@ -2212,6 +2250,7 @@
     $('btnBetCancel').addEventListener('click', function () { openBetPanel(false); });
     $('btnRotateHintClose').addEventListener('click', dismissRotateHint);
     $('btnInstall').addEventListener('click', onInstallClick);
+    $('btnInstallAnyway').addEventListener('click', onInstallAnywayClick);
     global.addEventListener('beforeinstallprompt', function (e) {
       e.preventDefault();          // 브라우저 기본 배너 대신 홈 카드에서 띄운다
       installPrompt = e;

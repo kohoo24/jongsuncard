@@ -1169,7 +1169,9 @@ button.act.gold.confirm { background: linear-gradient(180deg, #5a2a26, #3f1c19);
 .home-install .hi-text { flex: 1; min-width: 0; }
 .home-install h3 { margin: 0; font-size: 14px; }
 .home-install .home-desc { margin: 2px 0 0; }
-.home-install .act { flex: none; width: auto; margin: 0; padding: 10px 16px; min-height: 40px; }
+.home-install .hi-actions { display: flex; flex-direction: column; gap: 8px; flex: none; }
+.home-install .act { width: auto; margin: 0; padding: 10px 16px; min-height: 40px; }
+.home-install .act[hidden] { display: none; }
 .hi-steps { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--text); line-height: 1.5; }
 .hi-steps.hidden { display: none; }
 @media (max-width: 560px) { .home-install { flex-direction: column; align-items: stretch; } }

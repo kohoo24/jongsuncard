@@ -1012,6 +1012,32 @@ async function playHands(page, target, opts) {
     });
     check('카카오톡 안 브라우저에서는 "다른 브라우저로 열기" 안내를 보여준다', kk.kind === 'inapp' && /설치할 수 없|cannot install/.test(kk.desc) && kk.n === 3 && /다른 브라우저|other browser/.test(kk.text), JSON.stringify(kk));
     await kctx.close();
+    /* 삼성 인터넷: 껍데기 앱 경고(Android 14+) 때문에 Chrome 으로 열기를 먼저 권한다 */
+    const sctx = await browser.newContext({ viewport: { width: 393, height: 740 }, isMobile: true, hasTouch: true,
+      userAgent: 'Mozilla/5.0 (Linux; Android 14; SAMSUNG SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/24.0 Chrome/117.0.0.0 Mobile Safari/537.36' });
+    const spg = await sctx.newPage();
+    await spg.goto(URL);
+    await spg.waitForSelector('#homeModal.show');
+    const sam0 = await spg.evaluate(function () {
+      const card = document.getElementById('homeInstall');
+      return { kind: card.dataset.kind, label: document.getElementById('btnInstall').textContent, desc: document.getElementById('homeInstallDesc').textContent,
+        steps: document.getElementById('homeInstallSteps').querySelectorAll('li').length, anyway: document.getElementById('btnInstallAnyway').hidden };
+    });
+    check('삼성 인터넷에서는 "Chrome 에서 열기"를 먼저 권하고 경고 이유를 설명한다', sam0.kind === 'samsung' && /Chrome/.test(sam0.label) && /경고|warning/.test(sam0.desc) && sam0.steps === 3 && sam0.anyway === true, JSON.stringify(sam0));
+    const sam1 = await spg.evaluate(function () {
+      const opened = [];
+      window.HoldemUI.openExternal = function (u) { opened.push(u); };
+      document.getElementById('btnInstall').click();
+      let prompted = false;
+      window.HoldemUI.setInstallPrompt({ prompt: function () { prompted = true; }, userChoice: Promise.resolve({ outcome: 'dismissed' }) });
+      const anyway = document.getElementById('btnInstallAnyway');
+      const shown = !anyway.hidden;
+      anyway.click();
+      return { intent: opened[0] || '', shown: shown, prompted: prompted };
+    });
+    check('"Chrome 에서 열기"는 Chrome intent 로 이 주소를 열고, 설치 이벤트가 있으면 "그래도 설치" 버튼이 프롬프트를 띄운다',
+      /^intent:\/\/.+#Intent;scheme=https;package=com\.android\.chrome;/.test(sam1.intent) && sam1.shown && sam1.prompted, JSON.stringify(sam1));
+    await sctx.close();
     /* 서비스 워커: 아이콘은 없어도 셸 설치를 막지 않는다 · 배포 워크플로가 icons 를 싣는다 */
     const swSrc = require('fs').readFileSync(require('path').resolve(__dirname, '..', 'sw.js'), 'utf8');
     const wf = require('fs').readFileSync(require('path').resolve(__dirname, '..', '.github', 'workflows', 'pages.yml'), 'utf8');
