@@ -770,6 +770,7 @@ button.ghost[aria-pressed="false"] { opacity: .45; }
 button.act {
   flex: 1;
   padding: 13px 10px;
+  min-height: 48px;
   font-size: 15px; font-weight: 600; font-family: inherit;
   color: var(--text);
   background: linear-gradient(#26483a, #172f26);
@@ -1158,3 +1159,51 @@ button.act.gold.confirm { background: linear-gradient(180deg, #5a2a26, #3f1c19);
 .range-pop .rp-ctx { color: var(--text-2); font-size: 11px; margin-top: 4px; }
 .legend-item i.sw-call { background: var(--success); height: 10px; border-radius: 2px; }
 .legend-item i.sw-three { background: var(--info); height: 10px; border-radius: 2px; }
+
+/* ---------- 3단계: 베팅 패널 접기 · 리플레이 미니 테이블 · 히트맵 · 주간 리포트 · 모션 ---------- */
+.bet-cancel { display: none; }
+.raise-row.collapsible .bet-cancel { display: inline-block; flex: none; }
+.no-motion *, .no-motion *::before, .no-motion *::after { animation: none !important; transition: none !important; }
+
+.replay-table {
+  position: relative; height: 210px; margin: 8px 0 6px; border-radius: 46% / 40%;
+  background: radial-gradient(ellipse at 50% 40%, var(--felt-hi) 0%, #175f44 45%, var(--felt-lo) 100%);
+  border: 6px solid var(--rail-2); box-shadow: inset 0 0 40px rgba(0, 0, 0, .45);
+}
+.replay-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); text-align: center; }
+.replay-center .replay-pot { font-size: 12px; margin-bottom: 4px; color: var(--text); }
+.replay-center .replay-board { display: flex; gap: 3px; justify-content: center; min-height: 34px; }
+.replay-center .replay-preflop { color: var(--text-2); font-size: 11px; }
+.rseat {
+  position: absolute; transform: translate(-50%, -50%); min-width: 74px; text-align: center;
+  background: rgba(7, 20, 15, .92); border: 1px solid rgba(255, 255, 255, .14); border-radius: 8px; padding: 3px 6px; font-size: 10.5px;
+}
+.rseat .rs-name { display: block; font-weight: 600; white-space: nowrap; }
+.rseat .rs-cards { display: block; font-size: 10px; }
+.rseat .rs-bet { display: block; color: var(--gold); font-size: 10px; min-height: 12px; }
+.rseat.folded { opacity: .5; }
+.rseat.active { border-color: rgba(111, 227, 164, .9); box-shadow: 0 0 0 2px rgba(111, 227, 164, .3); }
+.rseat.hero { border-color: rgba(227, 185, 90, .8); }
+.replay-streets { display: flex; gap: 4px; flex-wrap: wrap; margin: 6px 0; }
+.replay-timeline { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 8px; max-height: 160px; overflow-y: auto; }
+.rt-street { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; }
+.rt-street > b { flex: none; width: 52px; color: var(--text-2); font-weight: 600; padding-top: 2px; }
+.rt-steps { display: flex; gap: 4px; flex-wrap: wrap; }
+.rt-step { background: rgba(255, 255, 255, .06); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; cursor: pointer; color: var(--text-2); font: inherit; font-size: 11px; }
+.rt-step.now { background: rgba(255, 255, 255, .18); color: var(--text); border-color: rgba(255, 255, 255, .4); }
+.rt-step.mine { color: var(--gold); }
+.replay-nav .mini-btn { flex: none; }
+
+.heatmap { border-collapse: collapse; width: 100%; font-size: 11.5px; margin: 4px 0 8px; }
+.heatmap th { color: var(--text-2); font-weight: 500; padding: 3px 4px; text-align: center; }
+.heatmap td { padding: 3px 4px; text-align: center; border-radius: 4px; }
+.heatmap td.hm-pos { text-align: left; color: var(--text); font-weight: 600; }
+.heatmap td.hm { color: var(--text); }
+.heatmap td.hm-none { color: var(--muted); }
+.heatmap td.hm-ok { background: rgba(111, 227, 164, .16); }
+.heatmap td.hm-warn { background: rgba(240, 162, 74, .28); }
+.heatmap td.hm-critical { background: rgba(240, 107, 99, .42); }
+.goals { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.goal { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 5px 8px; border-radius: 8px; background: rgba(0, 0, 0, .18); }
+.goal.done { color: var(--success); }
+.goal .g-val { font-weight: 700; }

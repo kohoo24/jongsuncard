@@ -66,6 +66,7 @@
     profile: null, drill: null,
     coach: null, coachUsed: false, coachSig: '',   // 플레이 도중 "생각 정리" (결정 하나에 한 번)
     allinArmed: false, allinTimer: null,
+    betOpen: false,        // 좁은 화면: 베팅 패널은 레이즈를 누를 때만 펼친다
     session: { hands: 0, lossBb: 0, byKey: {} },   // 이번 세션 성과 (세션 탭 요약)
     histFilter: 'all',
     raiseTo: 0     // 레이즈 목표 금액 — 슬라이더는 step 에 맞춰 값을 깎으므로 정확한 값은 따로 든다
@@ -352,6 +353,7 @@
     });
   }
   function reducedMotion() {
+    if (state.settings && state.settings.motion === false) return true;
     try { return global.matchMedia('(prefers-reduced-motion: reduce)').matches; }
     catch (e) { return false; }
   }
@@ -859,9 +861,10 @@
     const showChoice = g.phase === 'show-choice' && g.showChoicePlayer && g.showChoicePlayer.isHuman;
 
     hide($('btnRow'), !isHeroTurn);
-    hide($('raiseRow'), !isHeroTurn);
-    hide($('showRow'), !showChoice);
     refreshCoachSig();
+    hide($('raiseRow'), !isHeroTurn || betPanelHidden());
+    $('raiseRow').classList.toggle('collapsible', betCollapsible());
+    hide($('showRow'), !showChoice);
     hide($('coachBox'), !isHeroTurn || !state.coach);
     const canAddon = handOver && hero && g.canAddon(hero);
     hide($('addonRow'), !canAddon);
@@ -1044,7 +1047,8 @@
     if (state.allinArmed) { state.allinArmed = false; $('btnRaise').classList.remove('confirm'); }
     const a = g.actionsFor(hero);
     const v = state.raiseTo || a.minRaiseTo;
-    const key = v >= a.maxRaiseTo ? 'ctl.allin' : (a.isBet ? 'ctl.bet' : 'ctl.raise');
+    let key = v >= a.maxRaiseTo ? 'ctl.allin' : (a.isBet ? 'ctl.bet' : 'ctl.raise');
+    if (betCollapsible()) key = !state.betOpen ? 'ctl.raiseOpen' : (v >= a.maxRaiseTo ? 'ctl.confirmAllin' : 'ctl.confirm');
     $('btnRaise').querySelector('span').textContent = T(key, { amount: num(v) });
     if (a.canRaise) markPreset(g, a);
   }
@@ -1445,7 +1449,14 @@
   function refreshCoachSig() {
     const g = state.game;
     const sig = heroTurnNow() ? g.handNo + ':' + g.street + ':' + g.actionsOf(HERO_ID).length : '';
-    if (sig !== state.coachSig) { state.coachSig = sig; state.coach = null; state.coachUsed = false; }
+    if (sig !== state.coachSig) { state.coachSig = sig; state.coach = null; state.coachUsed = false; state.betOpen = false; }
+  }
+  /* 좁은 화면(폰)에서는 베팅 패널을 접어 두고 레이즈를 누르면 펼친다 — 컨트롤 높이가 펠트를 잡아먹는다 */
+  function betCollapsible() { return global.innerWidth < 720; }
+  function betPanelHidden() { return betCollapsible() && !state.betOpen; }
+  function openBetPanel(open) {
+    state.betOpen = !!open;
+    if (state.game) render();
   }
   /* 코치 버튼은 상단 바에 — 컨트롤에 줄을 더하면 작은 폰에서 펠트가 줄어든다. 히어로 차례에만 켜진다 */
   function updateCoachButton() {
@@ -1489,7 +1500,8 @@
     updateCoachButton();
     const isHeroTurn = !answered && g.phase === 'awaiting-action' && g.currentActor() === hero;
     hide($('btnRow'), !isHeroTurn);
-    hide($('raiseRow'), !isHeroTurn);
+    hide($('raiseRow'), !isHeroTurn || betPanelHidden());
+    $('raiseRow').classList.toggle('collapsible', betCollapsible());
     hide($('showRow'), true);
     hide($('addonRow'), true);
     hide($('nextRow'), true);
@@ -1680,7 +1692,10 @@
     openModal('reviewModal');
   }
   function openReplay(hand) {
-    H.panels.createReplay(hand, $('replayBody'));
+    if (state.replayCtl && state.replayCtl.stop) state.replayCtl.stop();
+    state.replayCtl = H.panels.createReplay(hand, $('replayBody'), {
+      onDrill: function (key) { closeModal('replayModal'); startDrill(key); }
+    });
     openModal('replayModal');
   }
 
@@ -1772,6 +1787,8 @@
       { value: 'coach', label: T('setup.modeCoach') }
     ], s.mode || 'play');
     $('optReviewTab').checked = s.reviewTab !== false;
+    $('optMotion').checked = s.motion !== false;
+    $('optSound').checked = s.sound !== false;
     $('optFourColor').checked = s.fourColor;
     $('optUnitBb').checked = s.unit === 'bb';
     $('optRebuy').checked = s.allowRebuy;
@@ -1811,9 +1828,10 @@
       showThinking: $('optMode').value === 'coach',
       autoReview: $('optMode').value === 'coach',
       fourColor: $('optFourColor').checked,
+      motion: $('optMotion').checked,
       unit: $('optUnitBb').checked ? 'bb' : 'chips',
       allowRebuy: $('optRebuy').checked,
-      sound: state.sound
+      sound: $('optSound').checked
     };
   }
 
@@ -1831,6 +1849,7 @@
     state.sound = s.sound !== false;
     H.i18n.setLang(s.lang);
     $('app').dataset.fourColor = String(!!s.fourColor);
+    document.body.classList.toggle('no-motion', s.motion === false);
     H.format.setUnit(s.unit);
     applyUnitUi();
     $('btnSound').textContent = state.sound ? '🔊' : '🔇';
@@ -1970,7 +1989,7 @@
     $('btnSetupHome').addEventListener('click', function () { closeModal('setupModal'); openHome(); });
     $('btnSetupX').addEventListener('click', function () { closeModal('setupModal'); openHome(); });
     $('btnReviewX').addEventListener('click', function () { closeModal('reviewModal'); });
-    $('btnReplayX').addEventListener('click', function () { closeModal('replayModal'); });
+    $('btnReplayX').addEventListener('click', function () { if (state.replayCtl) state.replayCtl.stop(); closeModal('replayModal'); });
     $('btnLearnX').addEventListener('click', function () { closeModal('learnModal'); openHome(); });
     $('btnOverRestart').addEventListener('click', function () {
       closeModal('overModal');
@@ -2011,6 +2030,7 @@
       if (!hero) return;
       const a = g.actionsFor(hero);
       const v = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, state.raiseTo || a.minRaiseTo));
+      if (betPanelHidden()) { openBetPanel(true); return; }
       /* 올인은 두 번: 첫 클릭은 확인 상태, 3초 안에 다시 누르면 실행 */
       if (v >= a.maxRaiseTo && v > a.minRaiseTo && !state.allinArmed) {
         state.allinArmed = true;
@@ -2068,13 +2088,14 @@
     });
     $('btnReview').addEventListener('click', openReview);
     $('btnCoach').addEventListener('click', openCoach);
+    $('btnBetCancel').addEventListener('click', function () { openBetPanel(false); });
     $('btnDrillNext').addEventListener('click', nextDrillSpot);
     $('btnDrillQuit').addEventListener('click', function () { if (state.drill && state.drill.session.daily && state.drill.session.asked) finishDaily(); else quitDrill(); });
     $('btnDrillFromSetup').addEventListener('click', function () {
       startDrill(state.profile ? state.profile.drillTarget() : null);
     });
     $('btnReviewClose').addEventListener('click', function () { closeModal('reviewModal'); });
-    $('btnReplayClose').addEventListener('click', function () { closeModal('replayModal'); });
+    $('btnReplayClose').addEventListener('click', function () { if (state.replayCtl) state.replayCtl.stop(); closeModal('replayModal'); });
     $('btnShow').addEventListener('click', function () {
       state.game.chooseShow(true); render(); loop();
     });
@@ -2133,6 +2154,7 @@
     const raw = H.storage.get('settings', null);
     if (raw && !raw.mode) state.settings.mode = raw.showEquity ? 'coach' : 'play';
     state.settings.showEquity = state.settings.showThinking = state.settings.autoReview = state.settings.mode === 'coach';
+    document.body.classList.toggle('no-motion', state.settings.motion === false);
     state.profile = H.profile.load();
     state.sound = state.settings.sound !== false;
     H.format.setUnit(state.settings.unit);

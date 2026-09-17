@@ -47,6 +47,8 @@
     this.acc = {};            // 자리별 최근 결과 창 (1 = 좋음·무난, 0 = 실수) 최대 ACC_WINDOW
     this.accPos = {};         // 자리별 최근 포지션 목록 (드릴 카드 라벨용)
     this.drillLog = [];       // 날짜별 드릴·오늘의 10문제 결과 [{date, asked, correct}]
+    this.cross = {};          // 포지션|스트리트 교차 누수 (히트맵)
+    this.days = {};           // 날짜별 실전 기록 {hands, decisions, loss} (주간 리포트)
     if (data && data.version === VERSION) {
       this.cats = data.cats || {};
       this.pos = data.pos || {};
@@ -60,8 +62,11 @@
       this.acc = data.acc || {};
       this.accPos = data.accPos || {};
       this.drillLog = data.drillLog || [];
+      this.cross = data.cross || {};
+      this.days = data.days || {};
     }
   }
+  const DAYS_LIMIT = 60;
   const DAILY_LIMIT = 14;
   const ACC_WINDOW = 20;
   const LOG_LIMIT = 60;
@@ -77,10 +82,15 @@
   function isMistake(item) { return item.verdict === 'mistake' || item.verdict === 'blunder'; }
 
   /** 핸드가 끝난 뒤, 그 핸드의 리뷰 항목들을 넣는다 */
-  Profile.prototype.addHand = function (items) {
+  Profile.prototype.addHand = function (items, opts) {
     if (!items || !items.length) return;
     const self = this;
     this.hands++;
+    const date = (opts && opts.date) || todayKey();
+    const day = this.days[date] || (this.days[date] = { hands: 0, decisions: 0, loss: 0 });
+    day.hands++;
+    const keys = Object.keys(this.days).sort();
+    if (keys.length > DAYS_LIMIT) keys.slice(0, keys.length - DAYS_LIMIT).forEach(function (k) { delete self.days[k]; });
     items.forEach(function (it) {
       if (!it || it.evLossBb == null || !it.spot) return;
       if (it.coached) return;   // 코치를 보고 한 결정은 실력이 아니다
@@ -91,6 +101,11 @@
         const p = self.bucket(self.pos, it.position);
         p.n++; p.loss += it.evLossBb; if (isMistake(it)) p.mistakes++;
       }
+      if (it.position) {
+        const x = self.bucket(self.cross, it.position + '|' + it.street);
+        x.n++; x.loss += it.evLossBb; if (isMistake(it)) x.mistakes++;
+      }
+      day.decisions++; day.loss += it.evLossBb;
       /* 최근 창: 드릴 카드의 "최근 20회 정확도" */
       const w = self.acc[key] || (self.acc[key] = []);
       w.push(isMistake(it) ? 0 : 1);
@@ -182,6 +197,44 @@
     this.recent.forEach(function (m) { count[m.key] = (count[m.key] || 0) + 1; });
     return Object.keys(count).map(function (k) { return { key: k, n: count[k] }; })
       .sort(function (a, b) { return b.n - a.n; }).slice(0, limit || 3);
+  };
+
+  /** 포지션 × 스트리트 히트맵 행렬 (기록 있는 포지션만) */
+  Profile.prototype.heatmap = function () {
+    const self = this;
+    const rows = [];
+    POSITIONS.forEach(function (pos) {
+      const cells = STREETS.map(function (st) {
+        const b = self.cross[pos + '|' + st];
+        return b && b.n ? { n: b.n, avg: b.loss / b.n, bb100: self.hands ? b.loss / self.hands * 100 : 0 } : null;
+      });
+      if (cells.some(function (c) { return c; })) rows.push({ pos: pos, cells: cells });
+    });
+    return { streets: STREETS, rows: rows };
+  };
+
+  /** 주간 리포트: 이번 7일과 지난 7일의 실전 핸드 · 결정당 손실 · 학습일 수 */
+  Profile.prototype.weekReport = function (today) {
+    const t = today ? new Date(today + 'T00:00:00') : new Date();
+    const end = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+    const dayMs = 86400000;
+    const self = this;
+    const studied = {};
+    this.drillLog.forEach(function (d) { if (d.asked > 0) studied[d.date] = true; });
+    this.daily.forEach(function (d) { studied[d.date] = true; });
+    const sum = function (from, to) {
+      let hands = 0, decisions = 0, loss = 0, studyDays = 0;
+      Object.keys(self.days).forEach(function (k) {
+        const x = new Date(k + 'T00:00:00').getTime();
+        if (x >= from && x <= to) { hands += self.days[k].hands; decisions += self.days[k].decisions; loss += self.days[k].loss; }
+      });
+      Object.keys(studied).forEach(function (k) {
+        const x = new Date(k + 'T00:00:00').getTime();
+        if (x >= from && x <= to) studyDays++;
+      });
+      return { hands: hands, decisions: decisions, loss: loss, avg: decisions ? loss / decisions : null, studyDays: studyDays };
+    };
+    return { now: sum(end - 6 * dayMs, end), before: sum(end - 13 * dayMs, end - 7 * dayMs) };
   };
 
   /*
@@ -282,7 +335,8 @@
       decisions: this.decisions, loss: this.loss, hands: this.hands,
       recent: this.recent, updated: this.updated,
       lastStyle: this.lastStyle, daily: this.daily,
-      acc: this.acc, accPos: this.accPos, drillLog: this.drillLog
+      acc: this.acc, accPos: this.accPos, drillLog: this.drillLog,
+      cross: this.cross, days: this.days
     };
   };
 

@@ -2073,5 +2073,25 @@ test('프로파일: 최근 정확도 창 · 드릴 카드 · 드릴 로그 · �
   eq(H.profile.create().drillCard(), null, '약점이 없으면 카드도 없다');
 });
 
+test('프로파일: 포지션 × 스트리트 히트맵과 주간 리포트', function () {
+  const p = H.profile.create();
+  const mk = function (st, pos, loss) { return { street: st, spot: st === 'preflop' ? 'open' : 'vsBet', position: pos, evLossBb: loss, verdict: loss >= 0.6 ? 'mistake' : 'good', cards: [], board: [], chosen: { type: 'call' }, best: { type: 'fold' } }; };
+  p.addHand([mk('preflop', 'BTN', 0.1), mk('flop', 'BTN', 1.0)], { date: '2026-09-17' });
+  p.addHand([mk('flop', 'BB', 0.8)], { date: '2026-09-10' });
+  const hm = p.heatmap();
+  eq(hm.rows.length, 2);
+  const btn = hm.rows.filter(function (r) { return r.pos === 'BTN'; })[0];
+  assert(btn.cells[0] && Math.abs(btn.cells[0].avg - 0.1) < 1e-9 && btn.cells[1] && Math.abs(btn.cells[1].avg - 1.0) < 1e-9, JSON.stringify(btn));
+  eq(btn.cells[2], null, '턴 기록 없음');
+  const wr = p.weekReport('2026-09-17');
+  eq(wr.now.hands, 1); eq(wr.before.hands, 1);
+  assert(Math.abs(wr.now.avg - 0.55) < 1e-9, '이번 주 결정당 손실 ' + wr.now.avg);
+  p.addDrill('flop/vsBet', 0.1, { date: '2026-09-16' });
+  eq(p.weekReport('2026-09-17').now.studyDays, 1);
+  const p2 = H.profile.create(JSON.parse(JSON.stringify(p.toJSON())));
+  eq(p2.heatmap().rows.length, 2, '저장/복원');
+  eq(Object.keys(p2.days).length, 2);
+});
+
 console.log('\n결과: ' + passed + ' 통과, ' + failed + ' 실패\n');
 process.exit(failed ? 1 : 0);

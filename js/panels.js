@@ -658,6 +658,73 @@
     host.appendChild(card);
   };
 
+  /* 누수 히트맵: 포지션 × 스트리트, 결정당 평균 손실 */
+  H.panels.renderHeatmap = function (profile, host) {
+    const hm = profile.heatmap();
+    if (!hm.rows.length) return;
+    const card = el('div', 'learn-stats');
+    card.appendChild(el('h4', 'panel-sub', T('learn.heatmap')));
+    const t = el('table', 'heatmap');
+    const thead = el('thead'); const hr = el('tr');
+    hr.appendChild(el('th', null, ''));
+    hm.streets.forEach(function (st) { hr.appendChild(el('th', null, T('street.' + st))); });
+    thead.appendChild(hr); t.appendChild(thead);
+    const tbody = el('tbody');
+    hm.rows.forEach(function (r) {
+      const tr = el('tr');
+      tr.appendChild(el('td', 'hm-pos', T('pos.' + r.pos)));
+      r.cells.forEach(function (c) {
+        if (!c) { tr.appendChild(el('td', 'hm-none', '·')); return; }
+        const sev = H.profile.severity(c.avg);
+        const td = el('td', 'hm hm-' + sev, c.avg.toFixed(2));
+        td.title = c.n + ' · ' + T('learn.bb100', { bb: '-' + c.bb100.toFixed(1) });
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    t.appendChild(tbody);
+    card.appendChild(t);
+    card.appendChild(el('div', 'learn-note', T('learn.heatmapHint')));
+    host.appendChild(card);
+  };
+
+  /* 주간 리포트와 목표 */
+  H.panels.renderWeekly = function (profile, host) {
+    const wr = profile.weekReport();
+    const card = el('div', 'learn-stats');
+    card.appendChild(el('h4', 'panel-sub', T('learn.weekly')));
+    const grid = el('div', 'ls-grid');
+    const tile = function (label, value, sub) {
+      const t = el('div', 'ls-tile');
+      t.appendChild(el('div', 'ls-label', label));
+      t.appendChild(el('div', 'ls-value', value));
+      if (sub) t.appendChild(el('div', 'ls-sub', sub));
+      grid.appendChild(t);
+    };
+    tile(T('learn.weekHands'), String(wr.now.hands), T('learn.lastWeek', { v: wr.before.hands }));
+    tile(T('learn.weekAvg'), wr.now.avg != null ? wr.now.avg.toFixed(2) + ' bb' : '—',
+      wr.before.avg != null ? T('learn.lastWeek', { v: wr.before.avg.toFixed(2) + ' bb' }) : null);
+    tile(T('learn.weekStudy'), T('learn.goalProgress', { a: wr.now.studyDays, b: 7 }), T('learn.lastWeek', { v: wr.before.studyDays }));
+    card.appendChild(grid);
+    /* 목표 */
+    card.appendChild(el('div', 'ls-label', T('learn.goals')));
+    const goals = el('div', 'goals');
+    const today = H.drill.dateKey();
+    const dailyDone = !!profile.dailyFor(today);
+    const goal = function (label, done, val) {
+      const g = el('div', 'goal' + (done ? ' done' : ''));
+      g.appendChild(el('span', null, label));
+      g.appendChild(el('span', 'g-val', done ? '✓ ' + T('learn.goalDone') : val));
+      goals.appendChild(g);
+    };
+    goal(T('learn.goalDaily'), dailyDone, '0/1');
+    goal(T('learn.goalStudy'), wr.now.studyDays >= 3, T('learn.goalProgress', { a: wr.now.studyDays, b: 3 }));
+    const streak = profile.streak();
+    if (streak >= 2) goal(T('learn.goalStreak', { n: streak }), dailyDone || profile.drillLog.some(function (d) { return d.date === today && d.asked > 0; }), '');
+    card.appendChild(goals);
+    host.appendChild(card);
+  };
+
   H.panels.renderLearn = function (profile, host, opts) {
     opts = opts || {};
     const onDrill = opts.onDrill || function () {};
@@ -669,6 +736,8 @@
     H.panels.renderDrillCard(profile.drillCard(), host, onDrill);
     H.panels.renderDaily(profile, host, { onDaily: opts.onDaily });
     if (profile.decisions || profile.drillLog.length) H.panels.renderLearnStats(profile, host);
+    if (profile.decisions || profile.drillLog.length || profile.daily.length) H.panels.renderWeekly(profile, host);
+    H.panels.renderHeatmap(profile, host);
     host.appendChild(el('h4', 'panel-sub', T('learn.title')));
 
     const target = profile.drillTarget();
@@ -1126,88 +1195,145 @@
   };
 
   /* ==================== 리플레이 ==================== */
-  H.panels.createReplay = function (hand, host) {
+  /*
+   * 리플레이: 미니 테이블(좌석을 타원에 배치, 보드 · 팟 · 베팅 · 폴드 · 현재 행동자) + 스트리트별
+   * 타임라인(누르면 그 시점으로) + 이전 · 재생/일시정지 · 다음 + 스트리트 점프 + 이 핸드로 훈련.
+   */
+  H.panels.createReplay = function (hand, host, opts) {
+    opts = opts || {};
     const steps = H.history.buildReplay(hand);
-    let idx = 0;
+    let idx = 0, timer = null;
     host.innerHTML = '';
 
     const title = el('h3', null, T('hist.handNo', { n: hand.no }) + ' · ' + hand.sb + '/' + hand.bb);
     host.appendChild(title);
 
-    const board = el('div', 'replay-board');
+    /* 미니 테이블 */
+    const table = el('div', 'replay-table');
+    const center = el('div', 'replay-center');
     const potEl = el('div', 'replay-pot');
-    const seatsEl = el('div', 'replay-seats');
+    const board = el('div', 'replay-board');
+    center.appendChild(potEl); center.appendChild(board);
+    table.appendChild(center);
+    const heroSeatIdx = Math.max(0, hand.seats.map(function (x) { return x.isHuman; }).indexOf(true));
+    const n = hand.seats.length;
+    const seatEls = hand.seats.map(function (seat, i) {
+      /* 히어로를 아래 가운데(90°)에 두고 시계 방향으로 */
+      const ang = Math.PI / 2 + ((i - heroSeatIdx + n) % n) * (2 * Math.PI / n);
+      const x = 50 + 42 * Math.cos(ang), y = 50 + 40 * Math.sin(ang);
+      const e = el('div', 'rseat' + (seat.isHuman ? ' hero' : ''));
+      e.style.left = x + '%'; e.style.top = y + '%';
+      e.appendChild(el('span', 'rs-name', seat.name + ' · ' + seat.position));
+      e.appendChild(el('span', 'rs-cards'));
+      e.appendChild(el('span', 'rs-bet'));
+      table.appendChild(e);
+      return e;
+    });
+    host.appendChild(table);
     const labelEl = el('div', 'replay-label');
-    host.appendChild(potEl);
-    host.appendChild(board);
-    host.appendChild(seatsEl);
     host.appendChild(labelEl);
 
+    /* 컨트롤 */
     const nav = el('div', 'replay-nav');
     const prev = el('button', 'act', T('hist.prev'));
+    const play = el('button', 'act', T('replay.play'));
     const pos = el('span', 'replay-pos');
     const next = el('button', 'act', T('hist.next'));
-    prev.type = next.type = 'button';
-    nav.appendChild(prev); nav.appendChild(pos); nav.appendChild(next);
+    prev.type = next.type = play.type = 'button';
+    play.id = 'btnReplayPlay';
+    nav.appendChild(prev); nav.appendChild(play); nav.appendChild(pos); nav.appendChild(next);
     host.appendChild(nav);
+    const streets = el('div', 'replay-streets');
+    const firstOf = {};
+    steps.forEach(function (st, i) { if (firstOf[st.street] == null) firstOf[st.street] = i; });
+    ['preflop', 'flop', 'turn', 'river'].forEach(function (st) {
+      if (firstOf[st] == null) return;
+      const b = el('button', 'sit-btn', T('street.' + st)); b.type = 'button'; b.dataset.street = st;
+      b.addEventListener('click', function () { stop(); idx = firstOf[st]; draw(); });
+      streets.appendChild(b);
+    });
+    if (hand.review && hand.review.length && opts.onDrill) {
+      let worst = hand.review[0];
+      hand.review.forEach(function (it) { if (it.evLossBb > worst.evLossBb) worst = it; });
+      const d = el('button', 'sit-btn drill-here', T('replay.drillHere')); d.type = 'button';
+      d.addEventListener('click', function () { stop(); opts.onDrill(worst.street + '/' + worst.spot); });
+      streets.appendChild(d);
+    }
+    host.appendChild(streets);
 
+    /* 타임라인 */
+    const tl = el('div', 'replay-timeline');
+    const stepBtns = [];
+    ['preflop', 'flop', 'turn', 'river', 'showdown'].forEach(function (st) {
+      const own = steps.map(function (x, i) { return { s: x, i: i }; }).filter(function (x) { return x.s.street === st; });
+      if (!own.length) return;
+      const row = el('div', 'rt-street');
+      row.appendChild(el('b', null, T(st === 'showdown' ? 'replay.showdown' : 'street.' + st)));
+      const box = el('div', 'rt-steps');
+      own.forEach(function (x) {
+        const b = el('button', 'rt-step' + (x.s.actor === hand.seats[heroSeatIdx].id ? ' mine' : ''), x.s.label);
+        b.type = 'button';
+        b.addEventListener('click', function () { stop(); idx = x.i; draw(); });
+        stepBtns[x.i] = b;
+        box.appendChild(b);
+      });
+      row.appendChild(box);
+      tl.appendChild(row);
+    });
+    host.appendChild(el('div', 'ls-label', T('replay.timeline')));
+    host.appendChild(tl);
+
+    function stepIndexOf(action) {
+      for (let i = 0; i < steps.length; i++) {
+        if (steps[i].actor === action.playerId && steps[i].kind === action.type && steps[i].street === action.street) return i;
+      }
+      return Infinity;
+    }
     function draw() {
       const s = steps[idx];
       potEl.textContent = T('table.pot') + ' ' + num(s.pot);
       board.innerHTML = '';
-      if (!s.community.length) {
-        // 프리플랍에는 보드가 비어 빈 칸처럼 보이므로 스트리트 이름을 대신 둔다
-        board.appendChild(el('span', 'replay-preflop', T('street.preflop')));
-      } else {
-        s.community.forEach(function (c) {
-          const card = el('div', 'card small');
-          card.dataset.suit = c.suit;
-          card.appendChild(H.cardart.face(c, { compact: true }));
-          board.appendChild(card);
-        });
-      }
-      seatsEl.innerHTML = '';
-      hand.seats.forEach(function (seat) {
-        const folded = hand.actions.some(function (a) {
-          return a.playerId === seat.id && a.type === 'fold'
-            && stepIndexOf(a) <= idx;
-        });
-        const row = el('div', 'replay-seat' + (folded ? ' folded' : '') +
-          (s.actor === seat.id ? ' active' : ''));
-        row.appendChild(el('span', 'rs-name', seat.name + ' (' + seat.position + ')'));
-        const cards = el('span', 'rs-cards');
+      if (!s.community.length) board.appendChild(el('span', 'replay-preflop', T('street.preflop')));
+      else s.community.forEach(function (c) {
+        const card = el('div', 'card small'); card.dataset.suit = c.suit;
+        card.appendChild(H.cardart.face(c, { compact: true })); board.appendChild(card);
+      });
+      hand.seats.forEach(function (seat, i) {
+        const e = seatEls[i];
+        const folded = hand.actions.some(function (a) { return a.playerId === seat.id && a.type === 'fold' && stepIndexOf(a) <= idx; });
+        e.classList.toggle('folded', folded);
+        e.classList.toggle('active', s.actor === seat.id);
         const reveal = s.reveal || seat.isHuman;
-        seat.cards.forEach(function (c) {
-          const mini = el('span', 'mini-card' + (H.cards.isRed(c) ? ' red' : ''));
-          mini.textContent = reveal
-            ? H.cards.RANK_LABEL[c.rank] + H.cards.SUIT_LABEL[c.suit]
-            : '░░';
-          cards.appendChild(mini);
-        });
-        row.appendChild(cards);
+        e.querySelector('.rs-cards').textContent = seat.cards.map(function (c) {
+          return reveal ? H.cards.RANK_LABEL[c.rank] + H.cards.SUIT_LABEL[c.suit] : '░░';
+        }).join(' ');
         const bet = s.bets[seat.id] || 0;
-        row.appendChild(el('span', 'rs-bet', bet ? num(bet) : ''));
-        seatsEl.appendChild(row);
+        e.querySelector('.rs-bet').textContent = bet ? num(bet) : '';
       });
       labelEl.textContent = s.label;
       pos.textContent = (idx + 1) + ' / ' + steps.length;
       prev.disabled = idx === 0;
       next.disabled = idx === steps.length - 1;
+      stepBtns.forEach(function (b, i) { if (b) b.classList.toggle('now', i === idx); });
+      if (stepBtns[idx] && stepBtns[idx].scrollIntoView) { try { stepBtns[idx].scrollIntoView({ block: 'nearest' }); } catch (e) { /* 무시 */ } }
     }
-    function stepIndexOf(action) {
-      for (let i = 0; i < steps.length; i++) {
-        if (steps[i].actor === action.playerId && steps[i].kind === action.type
-          && steps[i].street === action.street) return i;
-      }
-      return Infinity;
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = T('replay.play'); } }
+    function start() {
+      if (timer) return;
+      play.textContent = T('replay.pause');
+      timer = setInterval(function () {
+        if (idx >= steps.length - 1) { stop(); return; }
+        idx++; draw();
+      }, 900);
     }
-
-    prev.addEventListener('click', function () { if (idx > 0) { idx--; draw(); } });
-    next.addEventListener('click', function () { if (idx < steps.length - 1) { idx++; draw(); } });
+    prev.addEventListener('click', function () { stop(); if (idx > 0) { idx--; draw(); } });
+    next.addEventListener('click', function () { stop(); if (idx < steps.length - 1) { idx++; draw(); } });
+    play.addEventListener('click', function () { if (timer) stop(); else { if (idx >= steps.length - 1) idx = 0; start(); } });
     draw();
     return {
-      next: function () { if (idx < steps.length - 1) { idx++; draw(); } },
-      prev: function () { if (idx > 0) { idx--; draw(); } }
+      next: function () { stop(); if (idx < steps.length - 1) { idx++; draw(); } },
+      prev: function () { stop(); if (idx > 0) { idx--; draw(); } },
+      stop: stop
     };
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

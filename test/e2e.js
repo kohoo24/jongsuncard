@@ -317,12 +317,22 @@ async function playHands(page, target, opts) {
   const replay1 = await page.evaluate(function () {
     return document.querySelector('.replay-pos').textContent.trim();
   });
-  await page.click('.replay-nav button:nth-child(3)');
+  await page.click('.replay-nav .act:last-child');
   await page.waitForTimeout(150);
   const replay2 = await page.evaluate(function () {
     return document.querySelector('.replay-pos').textContent.trim();
   });
   check('리플레이를 앞으로 넘길 수 있다', replay1 !== replay2, replay1 + ' -> ' + replay2);
+  const mini = await page.evaluate(function () {
+    return { seats: document.querySelectorAll('#replayBody .rseat').length, steps: document.querySelectorAll('#replayBody .rt-step').length,
+      now: document.querySelectorAll('#replayBody .rt-step.now').length, play: !!document.getElementById('btnReplayPlay'),
+      streets: document.querySelectorAll('#replayBody .replay-streets .sit-btn').length, untranslated: /replay\./.test(document.getElementById('replayBody').textContent) };
+  });
+  check('리플레이에 미니 테이블(좌석 5)과 타임라인 · 재생 · 스트리트 점프가 있다', mini.seats === 5 && mini.steps >= 3 && mini.now === 1 && mini.play && mini.streets >= 1 && !mini.untranslated, JSON.stringify(mini));
+  await page.click('#replayBody .rt-step:first-child');
+  await page.waitForTimeout(100);
+  const jumped = await page.evaluate(function () { return document.querySelector('.replay-pos').textContent.trim(); });
+  check('타임라인을 누르면 그 시점으로 간다', /^1 \//.test(jumped), jumped);
   await page.click('#btnReplayClose');
 
   console.log('\n[핸드 리뷰]');
@@ -685,6 +695,11 @@ async function playHands(page, target, opts) {
   });
   check('학습 현황 화면에 진단 카드와 심각도 배지가 있다', learnModal.shown && learnModal.style && learnModal.sev > 0, JSON.stringify(learnModal));
   check('학습 현황에 드릴 카드와 학습 통계(연속 학습일)가 있다', learnModal.drillCard && learnModal.stats && !learnModal.untranslated, JSON.stringify(learnModal));
+  const learn3 = await page.evaluate(function () {
+    const body = document.getElementById('learnBody');
+    return { heat: !!body.querySelector('.heatmap'), heatCells: body.querySelectorAll('.heatmap td.hm').length, goals: body.querySelectorAll('.goal').length };
+  });
+  check('학습 현황에 누수 히트맵과 주간 리포트 목표가 있다', learn3.heat && learn3.heatCells > 0 && learn3.goals >= 2, JSON.stringify(learn3));
   await page.click('#btnLearnClose');
   await page.waitForTimeout(200);
   /* 같은 날 다시 시작하면 같은 첫 문제 */
@@ -911,6 +926,18 @@ async function playHands(page, target, opts) {
       if (!ready) continue;
       const hasBadge = await mp.evaluate(function () { return document.querySelectorAll('.seat .bet:not(.hidden)').length; });
       if (stage === '프리플랍') check((bots + 1) + '인 프리플랍: 베팅 배지가 보인다', hasBadge > 0, String(hasBadge));
+      if (stage === '프리플랍' && bots === 5) {
+        await mp.setViewportSize({ width: 390, height: 664 });
+        await mp.waitForTimeout(300);
+        const bet0 = await mp.evaluate(function () { return { row: document.getElementById('raiseRow').classList.contains('hidden'), label: document.getElementById('btnRaise').textContent }; });
+        await mp.click('#btnRaise');
+        await mp.waitForTimeout(200);
+        const bet1 = await mp.evaluate(function () { return { row: document.getElementById('raiseRow').classList.contains('hidden'), label: document.getElementById('btnRaise').textContent, cancel: !!document.querySelector('.raise-row.collapsible .bet-cancel') }; });
+        await mp.click('#btnBetCancel');
+        await mp.waitForTimeout(150);
+        const bet2 = await mp.evaluate(function () { return document.getElementById('raiseRow').classList.contains('hidden'); });
+        check('폰에서는 베팅 패널이 접혀 있고 레이즈를 누르면 펼쳐진다 (확정 · 접기)', bet0.row && !bet1.row && /확정|Confirm/.test(bet1.label) && bet1.cancel && bet2, JSON.stringify([bet0, bet1, bet2]));
+      }
       for (const vp of VPS) {
         await mp.setViewportSize({ width: vp[0], height: vp[1] });
         await mp.waitForTimeout(350);

@@ -46,6 +46,7 @@
     speed: 750,
     actionClock: 0,
     mode: 'play',          // 'play' 실전 (힌트 없음) | 'coach' 코치 (승률·오즈·AI 근거·자동 리뷰·생각 정리)
+    motion: true,          // 카드·칩 애니메이션
     reviewTab: true,       // 핸드가 끝나면 옆 패널을 리뷰 탭으로
     showEquity: true,      // 아래 셋은 mode 에서 파생된다 (옛 저장값 이전용으로 남김)
     showThinking: false,
