@@ -220,7 +220,9 @@
     6: ['B15', 'T18', 'T50', 'T82', 'B85'],
     7: ['B15', 'U18', 'T30', 'T70', 'U82', 'B85'],
     8: ['B15', 'U16', 'T18', 'T50', 'T82', 'U84', 'B85'],
-    9: ['B15', 'U15', 'T18', 'T50', 'U50', 'T82', 'U85', 'B85']
+    /* 9인은 팔각 고리: 히어로 → 왼쪽 아래(B) → 왼쪽 중간(M) → 왼쪽 위(S) → 위 둘(T) → 오른쪽 위(S) →
+       오른쪽 중간(M) → 오른쪽 아래(B). 3×2 격자(가운데 U50)는 액션 순서를 읽을 수 없다는 제보 */
+    9: ['B15', 'M15', 'S15', 'T36', 'T64', 'S85', 'M85', 'B85']
   };
   /* 가로(폭은 넉넉, 높이는 200px 남짓): 둘째 행(U)은 보드 양옆, 상단 행은 최대 4석 */
   const SHORT_SLOTS_LAND = {
@@ -290,13 +292,14 @@
     const potH = 31;
     const slots = (land && SHORT_SLOTS_LAND[n]) || SHORT_SLOTS[n] || SHORT_SLOTS[9];
     const topCy = margin + botBlock / 2;
-    const hasRow2 = !land && slots.some(function (s) { return s[0] === 'U'; });
-    /* 상단 행의 베팅 배지는 플레이트 아래 22px 까지 내려오므로 둘째 행을 그만큼 띄운다. 그 대신
-       둘째 행 아래 배지 여백은 딱 맞게(26) 줄여 보드 위치는 그대로다 */
-    const row2Cy = topCy + botBlock + (hasRow2 ? 22 : 4);
-    const lowestTop = hasRow2 ? row2Cy : topCy;
+    /* U: 둘째 행이 윗줄과 같은 열에 있어 윗줄 배지(22px)만큼 띄우고 보드는 그 아래.
+       S: 둘째 행이 양옆 열에만 있어 윗줄 바로 아래 붙이고, 보드는 윗줄 아래부터 (S 좌석과 열이 다르다) */
+    const hasU = !land && slots.some(function (s) { return s[0] === 'U'; });
+    const hasS = !land && slots.some(function (s) { return s[0] === 'S'; });
+    const row2Cy = topCy + botBlock + (hasU ? 22 : 4);
+    const lowestTop = hasU ? row2Cy : topCy;
     /* 보드: 가장 낮은 상단 행(과 배지) 아래부터. 가로에서는 배지가 옆에 붙어 여백이 작다 */
-    const boardTop = lowestTop + botBlock / 2 + (land ? 6 : (hasRow2 ? 26 : badge));
+    const boardTop = lowestTop + botBlock / 2 + (land ? 6 : ((hasU || hasS) ? 26 : badge));
     const boardBottom = boardTop + (land ? cardH : potH + cardH + 4);   // 낮은 펠트에선 스트리트 라벨을 숨긴다
     const boardMidY = boardTop + (land ? cardH / 2 : potH + 5 + cardH / 2);
     /* 히어로: 카드가 보드에 닿을 만큼 낮으면 카드를 플레이트 옆으로 (가로는 항상) */
@@ -308,18 +311,25 @@
        히어로 행 바로 위(보드와 히어로 사이에 생긴 여유)로 올린다. 가로는 폭이 넉넉하다. */
     let sideCy = (hcompact && !land) ? heroCy - heroH / 2 - botBlock / 2 - 2 : heroCy - (hcompact ? 0 : 12);
     if (hcompact && !land) sideCy = Math.max(sideCy, boardBottom + botBlock / 2 + 2);   // 보드 아래로
+    /* 중간 좌석(M): 둘째 행과 히어로 행 사이, 단 보드 카드 행보다는 아래 (폭 328 펠트에서는 카드가 옆 플레이트까지 닿는다) */
+    const row2Bottom = row2Cy + botBlock / 2, sideTop = sideCy - botBlock / 2;
+    let midCy = (row2Bottom + sideTop) / 2;
+    midCy = Math.max(midCy, boardBottom + botBlock / 2 + 4);
+    midCy = Math.min(midCy, sideTop - botBlock / 2 - 4);
     center.style.top = boardTop + 'px';
 
     state.seatOrder.forEach(function (p, i) {
       const e = state.seatEls[p.id], sp = state.seatPos[p.id];
       if (!e || !sp) return;
-      let x, cy, top, xPx;
+      let x, cy, top, xPx, kind = 'H';
       if (i === 0) { x = 50; cy = heroCy; top = false; xPx = fw / 2; }
       else {
         const s = slots[i - 1] || 'T50';
         x = parseInt(s.slice(1), 10);
-        if (s[0] === 'T') { cy = topCy; top = true; }
-        else if (s[0] === 'U') { cy = land ? boardMidY : row2Cy; top = true; }
+        kind = s[0];
+        if (kind === 'T') { cy = topCy; top = true; }
+        else if (kind === 'U' || kind === 'S') { cy = land ? boardMidY : row2Cy; top = true; }
+        else if (kind === 'M') { cy = midCy; top = true; }
         else { cy = sideCy; top = false; }
         /* 좁은 펠트에서 15% 는 플레이트 반폭보다 작아 밖으로 나간다 — 여백을 두고 안으로 민다.
            맨 윗줄은 둥근 모서리(26px)에 걸리지 않게 조금 더 */
@@ -331,6 +341,9 @@
       e.root.classList.toggle('top', top);
       e.root.classList.toggle('bottom', !top);
       e.root.classList.toggle('right', x > 50);
+      /* 배지 방향: S 는 플레이트 아래 바깥쪽 정렬(보드 카드를 피함), M 은 안쪽 옆 */
+      e.root.classList.toggle('sideseat', kind === 'S');
+      e.root.classList.toggle('midseat', kind === 'M');
       sp.x = xPx / fw * 100; sp.y = cy / fh * 100;
     });
   }

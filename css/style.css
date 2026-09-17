@@ -882,6 +882,12 @@ kbd {
 /* 히어로 압축(세로): 양옆 좌석이 히어로 행 위로 올라오므로 그 배지는 안쪽으로 붙인다 */
 .felt.short.hcompact:not(.land) .seat.bottom.bot .bet { top: 50%; bottom: auto; left: 100%; transform: translate(4px, -50%); }
 .felt.short.hcompact:not(.land) .seat.bottom.bot.right .bet { left: auto; right: 100%; transform: translate(-4px, -50%); }
+/* 팔각 고리(9인 세로): 둘째 행 양옆(S)의 배지는 플레이트 아래 바깥쪽에 — 가운데 정렬하면 보드 카드에 걸린다.
+   중간 좌석(M)의 배지는 안쪽 옆에 — 아래에는 히어로 행 좌석이 온다 */
+.felt.short .seat.sideseat .bet { left: 0; transform: none; }
+.felt.short .seat.sideseat.right .bet { left: auto; right: 0; transform: none; }
+.felt.short .seat.midseat .bet { bottom: auto; top: 50%; left: 100%; transform: translate(4px, -50%); }
+.felt.short .seat.midseat.right .bet { left: auto; right: 100%; transform: translate(-4px, -50%); }
 /* 봇의 뒷면 카드는 그리지 않는다 — 폴드는 흐림으로 구분되고, 공개된 카드만 플레이트 옆에 붙는다 */
 .felt.short .seat.bot .card.back { display: none; }
 .felt.short .seat.bot .cards:empty { display: none; }
