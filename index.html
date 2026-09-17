@@ -43,11 +43,11 @@
 
     <aside class="side" id="sidePanel" aria-label="정보 패널">
       <nav class="tabs" role="tablist">
-        <button class="tab on" data-tab="log" role="tab" aria-selected="true" data-i18n="tab.log">기록</button>
-        <button class="tab" data-tab="stats" role="tab" aria-selected="false" data-i18n="tab.stats">통계</button>
-        <button class="tab" data-tab="hist" role="tab" aria-selected="false" data-i18n="tab.hist">히스토리</button>
-        <button class="tab" data-tab="chart" role="tab" aria-selected="false" data-i18n="tab.chart">차트</button>
-        <button class="tab" data-tab="learn" role="tab" aria-selected="false" data-i18n="tab.learn">학습</button>
+        <button class="tab on" data-tab="log" role="tab" aria-selected="true" data-i18n="tab.log">현재 핸드</button>
+        <button class="tab" data-tab="review" role="tab" aria-selected="false" data-i18n="tab.review">리뷰</button>
+        <button class="tab" data-tab="chart" role="tab" aria-selected="false" data-i18n="tab.chart">레인지</button>
+        <button class="tab" data-tab="stats" role="tab" aria-selected="false" data-i18n="tab.stats">세션</button>
+        <button class="tab" data-tab="learn" role="tab" aria-selected="false" data-i18n="tab.learn">훈련</button>
       </nav>
       <div class="tab-body" id="tabBody" role="tabpanel" aria-live="polite"></div>
     </aside>
@@ -129,6 +129,7 @@
 <!-- 학습 현황 (홈에서 여는 전체 화면) -->
 <div class="modal" id="learnModal" role="dialog" aria-modal="true" aria-labelledby="learnTitle">
   <div class="modal-box wide">
+    <button class="modal-x" id="btnLearnX" type="button" tabindex="-1" aria-label="닫기">&times;</button>
     <h2 id="learnTitle" data-i18n="learn.status">학습 현황</h2>
     <div id="learnBody" class="scroll-body learn-body"></div>
     <button class="act big" id="btnLearnClose" data-i18n="common.close">닫기</button>
@@ -138,6 +139,7 @@
 <!-- 설정 -->
 <div class="modal" id="setupModal" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
   <div class="modal-box wide">
+    <button class="modal-x" id="btnSetupX" type="button" tabindex="-1" aria-label="닫기">&times;</button>
     <h2 id="setupTitle"><span class="pip">&spades;</span> <span data-i18n="app.title">텍사스 홀덤</span></h2>
     <p class="sub" data-i18n="app.subtitle"></p>
 
@@ -148,31 +150,36 @@
         <select id="optDifficulty"></select></label>
       <label class="field"><span data-i18n="setup.startChips"></span>
         <select id="optChips"></select></label>
-      <label class="field"><span data-i18n="setup.blinds"></span>
-        <select id="optBlinds"></select></label>
-      <label class="field"><span data-i18n="setup.structure"></span>
-        <select id="optStructure"></select></label>
-      <label class="field"><span data-i18n="setup.ante"></span>
-        <select id="optAnte"></select></label>
-      <label class="field"><span data-i18n="setup.speed"></span>
-        <select id="optSpeed"></select></label>
-      <label class="field"><span data-i18n="setup.clock"></span>
-        <select id="optClock"></select></label>
-      <label class="field"><span data-i18n="setup.language"></span>
-        <select id="optLang"></select></label>
-      <label class="field"><span data-i18n="setup.seed"></span>
-        <input type="text" id="optSeed" placeholder="—" maxlength="10"></label>
+      <label class="field"><span data-i18n="setup.mode"></span>
+        <select id="optMode"></select></label>
     </div>
-    <p class="hint" data-i18n="setup.seedHint"></p>
 
-    <div class="check-grid">
-      <label class="field check"><input type="checkbox" id="optEquity"><span data-i18n="setup.showEquity"></span></label>
-      <label class="field check"><input type="checkbox" id="optThinking"><span data-i18n="setup.showThinking"></span></label>
-      <label class="field check"><input type="checkbox" id="optReview"><span data-i18n="setup.autoReview"></span></label>
-      <label class="field check"><input type="checkbox" id="optFourColor"><span data-i18n="setup.fourColor"></span></label>
-      <label class="field check"><input type="checkbox" id="optUnitBb"><span data-i18n="setup.unitBb"></span></label>
-      <label class="field check"><input type="checkbox" id="optRebuy"><span data-i18n="setup.rebuy"></span></label>
-    </div>
+    <details class="setup-adv" id="setupAdvanced">
+      <summary data-i18n="setup.advanced">고급 설정</summary>
+      <div class="field-grid">
+        <label class="field"><span data-i18n="setup.blinds"></span>
+          <select id="optBlinds"></select></label>
+        <label class="field"><span data-i18n="setup.structure"></span>
+          <select id="optStructure"></select></label>
+        <label class="field"><span data-i18n="setup.ante"></span>
+          <select id="optAnte"></select></label>
+        <label class="field"><span data-i18n="setup.speed"></span>
+          <select id="optSpeed"></select></label>
+        <label class="field"><span data-i18n="setup.clock"></span>
+          <select id="optClock"></select></label>
+        <label class="field"><span data-i18n="setup.language"></span>
+          <select id="optLang"></select></label>
+        <label class="field"><span data-i18n="setup.seed"></span>
+          <input type="text" id="optSeed" placeholder="—" maxlength="10"></label>
+      </div>
+      <p class="hint" data-i18n="setup.seedHint"></p>
+      <div class="check-grid">
+        <label class="field check"><input type="checkbox" id="optReviewTab"><span data-i18n="setup.reviewTab"></span></label>
+        <label class="field check"><input type="checkbox" id="optFourColor"><span data-i18n="setup.fourColor"></span></label>
+        <label class="field check"><input type="checkbox" id="optUnitBb"><span data-i18n="setup.unitBb"></span></label>
+        <label class="field check"><input type="checkbox" id="optRebuy"><span data-i18n="setup.rebuy"></span></label>
+      </div>
+    </details>
 
     <button class="act gold big" id="btnStart" data-i18n="setup.start">게임 시작</button>
     <button class="act ghost-btn small" id="btnResume" hidden>이어하기</button>
@@ -196,6 +203,7 @@
 <!-- 핸드 리뷰 -->
 <div class="modal" id="reviewModal" role="dialog" aria-modal="true" aria-labelledby="reviewTitle">
   <div class="modal-box wide">
+    <button class="modal-x" id="btnReviewX" type="button" tabindex="-1" aria-label="닫기">&times;</button>
     <h2 id="reviewTitle" data-i18n="review.title">핸드 리뷰</h2>
     <div id="reviewBody" class="scroll-body"></div>
     <button class="act big" id="btnReviewClose" data-i18n="common.close">닫기</button>
@@ -205,6 +213,7 @@
 <!-- 리플레이 -->
 <div class="modal" id="replayModal" role="dialog" aria-modal="true" aria-labelledby="replayTitle">
   <div class="modal-box wide">
+    <button class="modal-x" id="btnReplayX" type="button" tabindex="-1" aria-label="닫기">&times;</button>
     <div id="replayBody" class="scroll-body"></div>
     <button class="act big" id="btnReplayClose" data-i18n="hist.close">닫기</button>
   </div>

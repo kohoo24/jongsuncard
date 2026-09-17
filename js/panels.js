@@ -39,10 +39,17 @@
   H.panels = { SERIES: SERIES };
 
   /* ==================== 로그 ==================== */
-  H.panels.renderLog = function (game, host) {
+  /* 현재 핸드 탭: 이번 핸드의 로그만 (지난 핸드는 리뷰 탭의 과거 핸드에서 리플레이) */
+  H.panels.renderLog = function (game, host, opts) {
     host.innerHTML = '';
     const list = el('div', 'loglist');
-    game.log.slice(-200).forEach(function (e) {
+    let entries = game.log.slice(-200);
+    if (opts && opts.currentHand) {
+      let start = 0;
+      for (let i = entries.length - 1; i >= 0; i--) { if (entries[i].kind === 'hand') { start = i; break; } }
+      entries = entries.slice(start);
+    }
+    entries.forEach(function (e) {
       const d = el('div', 'l-' + e.kind, e.text);
       list.appendChild(d);
     });
@@ -742,9 +749,11 @@
       host.appendChild(card);
       return;
     }
+    const conf = diag.confidence || (diag.hands >= 200 ? 'high' : diag.hands >= 60 ? 'mid' : 'low');
     const head = el('div', 'style-head');
     head.appendChild(el('span', 'style-icon', diag.icon));
     const names = el('div', 'style-names');
+    if (conf === 'low') names.appendChild(el('div', 'style-est', T('style.estimated')));
     names.appendChild(el('div', 'style-type', T('style.type.' + diag.type)));
     names.appendChild(el('div', 'style-desc', T('style.typeDesc.' + diag.type)));
     head.appendChild(names);
@@ -753,7 +762,9 @@
     score.appendChild(el('span', null, T('style.score', { score: '' }).trim()));
     head.appendChild(score);
     card.appendChild(head);
-    card.appendChild(el('div', 'style-meta', (opts.saved ? T('style.saved') + ' · ' : '') + T('style.hands', { n: diag.hands })));
+    card.appendChild(el('div', 'style-meta', (opts.saved ? T('style.saved') + ' · ' : '') + T('style.hands', { n: diag.hands })
+      + ' · ' + T('style.confidence', { level: T('style.conf.' + conf) })));
+    if (conf === 'low') card.appendChild(el('div', 'style-confnote', T('style.confNote', { n: diag.hands })));
     if (diag.point && diag.bounds) card.appendChild(quadrantChart(diag));
 
     /* 지표 막대: 기준 범위를 띠로, 내 값을 점으로 */
@@ -817,6 +828,20 @@
       card.appendChild(list);
     }
     host.appendChild(card);
+  };
+
+  /* ==================== 리뷰 탭: 지난 핸드 리뷰 + 과거 핸드 ==================== */
+  H.panels.renderReviewTab = function (summary, recorder, host, heroId, onOpen) {
+    host.innerHTML = '';
+    host.appendChild(el('h4', 'panel-sub', T('review.lastHand')));
+    const box = el('div', 'review-tab-last');
+    if (summary && summary.items.length) H.panels.renderReview(summary, box);
+    else box.appendChild(el('p', 'empty', T('review.noneYet')));
+    host.appendChild(box);
+    host.appendChild(el('h4', 'panel-sub', T('review.pastHands')));
+    const past = el('div');
+    H.panels.renderHistory(recorder, past, heroId, onOpen);
+    host.appendChild(past);
   };
 
   /* ==================== 핸드 리뷰 ==================== */

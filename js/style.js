@@ -94,6 +94,8 @@
 
     return {
       type: type.key, icon: type.icon, score: clamp(score, 0, 100), hands: stats.hands,
+      /* 표본이 작을 때 "나는 물고기" 같은 단정은 피한다 — 신뢰도를 같이 낸다 */
+      confidence: stats.hands >= 200 ? 'high' : stats.hands >= 60 ? 'mid' : 'low',
       loose: loose, aggressive: aggressive,
       /* 4분면 차트용: 내 좌표와 경계, 탄탄한 범위 */
       point: { vpip: stats.vpip, ratio: clamp(ratio, 0, 1) },

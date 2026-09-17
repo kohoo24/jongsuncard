@@ -65,6 +65,7 @@
     sound: true, winningCards: [], busy: false,
     profile: null, drill: null,
     coach: null, coachUsed: false, coachSig: '',   // 플레이 도중 "생각 정리" (결정 하나에 한 번)
+    allinArmed: false, allinTimer: null,
     raiseTo: 0     // 레이즈 목표 금액 — 슬라이더는 step 에 맞춰 값을 깎으므로 정확한 값은 따로 든다
   };
   global.HoldemUI = state;
@@ -1038,6 +1039,7 @@
     const g = state.game;
     const hero = g.byId(HERO_ID);
     if (!hero) return;
+    if (state.allinArmed) { state.allinArmed = false; $('btnRaise').classList.remove('confirm'); }
     const a = g.actionsFor(hero);
     const v = state.raiseTo || a.minRaiseTo;
     const key = v >= a.maxRaiseTo ? 'ctl.allin' : (a.isBet ? 'ctl.bet' : 'ctl.raise');
@@ -1278,6 +1280,8 @@
       const diag = H.style.diagnose(state.tracker.get(HERO_ID), g.players.length);
       if (diag) { state.profile.setStyle(diag); H.profile.save(state.profile); }
     }
+    /* 핸드가 끝나면 옆 패널은 리뷰 탭으로 (실전 모드의 "끝나면 리뷰") */
+    if (state.settings.reviewTab !== false && state.reviewItems.length) switchTab('review');
     if (state.settings.autoReview && state.reviewItems.length
       && state.lastSummary.total > g.bigBlind * 0.6) {
       // 다음 핸드가 이미 시작됐다면 띄우지 않는다 (클릭을 가로채는 문제)
@@ -1440,7 +1444,9 @@
     const b = $('btnCoach');
     if (!b) return;
     refreshCoachSig();
-    b.disabled = !heroTurnNow();
+    const coachMode = state.settings.mode === 'coach';
+    b.disabled = !coachMode || !heroTurnNow();
+    b.classList.toggle('hidden', !coachMode);
     b.setAttribute('aria-pressed', String(!!state.coach));
     b.title = T('coach.btn');
   }
@@ -1608,9 +1614,9 @@
       return;
     }
     if (!state.game) return;
-    if (state.tab === 'log') H.panels.renderLog(state.game, host);
+    if (state.tab === 'log') H.panels.renderLog(state.game, host, { currentHand: true });
     else if (state.tab === 'stats') H.panels.renderStats(state.tracker, state.game, host, HERO_ID);
-    else if (state.tab === 'hist') H.panels.renderHistory(state.recorder, host, HERO_ID, openReplay);
+    else if (state.tab === 'review') H.panels.renderReviewTab(state.lastSummary, state.recorder, host, HERO_ID, openReplay);
     else if (state.tab === 'chart') {
       state.chartState.playerCount = state.game.players.length;
       const hero = state.game.byId(HERO_ID);
@@ -1726,9 +1732,11 @@
       return { value: l, label: H.i18n.LANG_NAMES[l] };
     }), s.lang);
     $('optSeed').value = s.seed || '';
-    $('optEquity').checked = s.showEquity;
-    $('optThinking').checked = s.showThinking;
-    $('optReview').checked = s.autoReview;
+    fillSelect('optMode', [
+      { value: 'play', label: T('setup.modePlay') },
+      { value: 'coach', label: T('setup.modeCoach') }
+    ], s.mode || 'play');
+    $('optReviewTab').checked = s.reviewTab !== false;
     $('optFourColor').checked = s.fourColor;
     $('optUnitBb').checked = s.unit === 'bb';
     $('optRebuy').checked = s.allowRebuy;
@@ -1761,9 +1769,12 @@
       speed: parseInt($('optSpeed').value, 10),
       actionClock: parseInt($('optClock').value, 10),
       seed: $('optSeed').value.trim(),
-      showEquity: $('optEquity').checked,
-      showThinking: $('optThinking').checked,
-      autoReview: $('optReview').checked,
+      mode: $('optMode').value,
+      reviewTab: $('optReviewTab').checked,
+      /* 코치 모드에서 파생 — 옛 코드 경로가 그대로 읽는다 */
+      showEquity: $('optMode').value === 'coach',
+      showThinking: $('optMode').value === 'coach',
+      autoReview: $('optMode').value === 'coach',
       fourColor: $('optFourColor').checked,
       unit: $('optUnitBb').checked ? 'bb' : 'chips',
       allowRebuy: $('optRebuy').checked,
@@ -1919,6 +1930,10 @@
     $('btnHomeLearn').addEventListener('click', openLearnModal);
     $('btnLearnClose').addEventListener('click', function () { closeModal('learnModal'); openHome(); });
     $('btnSetupHome').addEventListener('click', function () { closeModal('setupModal'); openHome(); });
+    $('btnSetupX').addEventListener('click', function () { closeModal('setupModal'); openHome(); });
+    $('btnReviewX').addEventListener('click', function () { closeModal('reviewModal'); });
+    $('btnReplayX').addEventListener('click', function () { closeModal('replayModal'); });
+    $('btnLearnX').addEventListener('click', function () { closeModal('learnModal'); openHome(); });
     $('btnOverRestart').addEventListener('click', function () {
       closeModal('overModal');
       buildSetup();
@@ -1958,6 +1973,16 @@
       if (!hero) return;
       const a = g.actionsFor(hero);
       const v = Math.max(a.minRaiseTo, Math.min(a.maxRaiseTo, state.raiseTo || a.minRaiseTo));
+      /* 올인은 두 번: 첫 클릭은 확인 상태, 3초 안에 다시 누르면 실행 */
+      if (v >= a.maxRaiseTo && v > a.minRaiseTo && !state.allinArmed) {
+        state.allinArmed = true;
+        $('btnRaise').classList.add('confirm');
+        $('btnRaise').querySelector('span').textContent = T('ctl.allinConfirm');
+        clearTimeout(state.allinTimer);
+        state.allinTimer = setTimeout(function () { state.allinArmed = false; $('btnRaise').classList.remove('confirm'); if (state.game) updateRaiseLabel(); }, 3000);
+        return;
+      }
+      state.allinArmed = false; $('btnRaise').classList.remove('confirm');
       heroAct({ type: 'raise', amount: v });
     });
     $('raiseSlider').addEventListener('input', function () {
@@ -2066,6 +2091,10 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     state.settings = H.storage.loadSettings();
+    /* 옛 저장값(승률 표시 체크박스)에서 모드를 이전한다. 새 사용자는 실전이 기본 */
+    const raw = H.storage.get('settings', null);
+    if (raw && !raw.mode) state.settings.mode = raw.showEquity ? 'coach' : 'play';
+    state.settings.showEquity = state.settings.showThinking = state.settings.autoReview = state.settings.mode === 'coach';
     state.profile = H.profile.load();
     state.sound = state.settings.sound !== false;
     H.format.setUnit(state.settings.unit);

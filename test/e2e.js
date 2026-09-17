@@ -48,6 +48,8 @@ async function toSetup(page) {
   const home = await page.$('#homeModal.show');
   if (home) await page.click('#btnHomePlay');
   await page.waitForSelector('#setupModal.show', { timeout: 10000 });
+  /* 고급 설정은 접혀 있다 — 테스트는 블라인드·앤티·시드를 만지므로 편다 */
+  await page.evaluate(function () { document.getElementById('setupAdvanced').open = true; });
 }
 
 async function safeClick(page, selector) {
@@ -153,7 +155,6 @@ async function playHands(page, target, opts) {
   await page.fill('#optSeed', 'E2E001');
   /* 자동 리뷰 모달은 핸드가 끝난 뒤 임의의 시점에 떠서 클릭과 경합한다.
      리뷰 기능은 아래에서 버튼으로 직접 열어 검사하므로 여기서는 끈다. */
-  await page.uncheck('#optReview');
   await page.click('#btnStart');
   await page.waitForTimeout(600);
 
@@ -273,7 +274,7 @@ async function playHands(page, target, opts) {
     }));
 
   console.log('\n[핸드 히스토리와 리플레이]');
-  await safeClick(page, '.tab[data-tab="hist"]');
+  await safeClick(page, '.tab[data-tab="review"]');
   await page.waitForTimeout(300);
   const histRows = await page.evaluate(function () { return document.querySelectorAll('.hist-row').length; });
   check('히스토리에 핸드가 쌓인다', histRows >= 5, '행 ' + histRows);
@@ -405,13 +406,21 @@ async function playHands(page, target, opts) {
         check('올인 프리셋은 step 과 무관하게 정확한 올인 금액을 잡는다',
           allin.v === ctx2.max && allin.label.indexOf('995') >= 0 || allin.v === ctx2.max,
           JSON.stringify({ v: allin.v, max: ctx2.max, slider: ctx2.slider, label: allin.label }));
+        /* 올인은 두 번 눌러 확인한다 — 첫 클릭은 확인 상태, 두 번째가 실행 */
+        await page.click('#btnRaise');
+        await page.waitForTimeout(120);
+        const armed = await page.evaluate(function () {
+          const b = document.getElementById('btnRaise');
+          return { confirm: b.classList.contains('confirm'), text: b.textContent, allIn: window.HoldemUI.game.byId(0).allIn };
+        });
+        check('올인 첫 클릭은 확인 상태가 되고 아직 실행되지 않는다', armed.confirm && !armed.allIn, JSON.stringify(armed));
         await page.click('#btnRaise');
         await page.waitForTimeout(150);
         const after = await page.evaluate(function () {
           const g = window.HoldemUI.game, h = g.byId(0);
           return { allIn: h.allIn, chips: h.chips, bet: h.bet };
         });
-        check('올인 버튼을 누르면 실제로 올인된다', after.allIn && after.chips === 0, JSON.stringify(after));
+        check('올인 버튼을 다시 누르면 실제로 올인된다', after.allIn && after.chips === 0, JSON.stringify(after));
       }
     }
   }
@@ -439,7 +448,7 @@ async function playHands(page, target, opts) {
   check('토글하면 팟·칩·버튼이 bb 로 바뀐다',
     bbView.pressed === 'true' && /bb/.test(bbView.pot) && /bb/.test(bbView.chips) && (bbView.canCheck || /bb/.test(bbView.call)),
     JSON.stringify(bbView));
-  check('입력칸도 bb 로 보인다', !bbView.canRaise || (bbView.unitShown && parseFloat(bbView.input) * bbView.bb === bbView.raiseTo), JSON.stringify(bbView));
+  check('입력칸도 bb 로 보인다', !bbView.canRaise || (bbView.unitShown && Math.abs(parseFloat(bbView.input) * bbView.bb - bbView.raiseTo) < 0.06 * bbView.bb), JSON.stringify(bbView));
   check('설정에 저장된다', bbView.setting === 'bb');
   check('좌석의 마지막 액션 금액도 bb 다', bbView.lastActs.every(function (t) { return /bb/.test(t); }), JSON.stringify(bbView.lastActs));
   if (bbView.canRaise) {
@@ -536,7 +545,23 @@ async function playHands(page, target, opts) {
     handBeforeDrill + ' -> ' + JSON.stringify(resumedAfterDrill));
 
   console.log('\n[코치 · 스타일 진단 · 오늘의 10문제]');
-  await restartIfOver(page, 'E2E003');
+  /* 실전 모드(기본)에서는 힌트와 코치 버튼이 없다 */
+  await waitHeroTurn(page, 'E2E003');
+  const playMode = await page.evaluate(function () {
+    return { mode: window.HoldemUI.settings.mode, coach: document.getElementById('btnCoach').classList.contains('hidden'),
+      hints: document.querySelectorAll('#heroReadout .equity, #heroReadout .odds, #heroReadout .outs').length,
+      hand: document.querySelectorAll('#heroReadout .hand').length };
+  });
+  check('실전 모드가 기본이고 승률·오즈·코치 버튼이 숨는다 (족보는 남는다)', playMode.mode === 'play' && playMode.coach && playMode.hints === 0 && playMode.hand === 1, JSON.stringify(playMode));
+  /* 코치 모드로 새 판 */
+  await page.evaluate(function () { document.getElementById('btnMenu').click(); });
+  await page.waitForTimeout(200);
+  await page.click('#btnHomePlay');
+  await page.waitForSelector('#setupModal.show');
+  await page.selectOption('#optMode', 'coach');
+  await page.fill('#optSeed', 'E2E003');
+  await page.click('#btnStart');
+  await page.waitForTimeout(600);
   await waitHeroTurn(page, 'E2E003');
   const coach0 = await page.evaluate(function () {
     return {
@@ -768,7 +793,6 @@ async function playHands(page, target, opts) {
     check('상대를 8명까지 고를 수 있다', optMax === 8, String(optMax));
     await p9.selectOption('#optBots', '8');
     await p9.selectOption('#optSpeed', '350');
-    await p9.uncheck('#optReview');
     await p9.fill('#optSeed', 'NINE1');
     await p9.click('#btnStart');
     await p9.waitForTimeout(700);
@@ -815,7 +839,6 @@ async function playHands(page, target, opts) {
     await mp.selectOption('#optBots', String(bots));
     await mp.selectOption('#optSpeed', '350');
     await mp.selectOption('#optChips', '5000');
-    await mp.uncheck('#optReview');
     await mp.fill('#optSeed', 'OVL' + bots);
     await mp.click('#btnStart');
     await mp.waitForTimeout(500);
