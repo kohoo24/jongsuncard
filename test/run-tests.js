@@ -2035,5 +2035,43 @@ test('스타일 진단은 4분면 차트 좌표와 경계를 준다', function (
   assert(d.point.vpip > d.bounds.vpipHi && d.point.ratio < d.bounds.ratioLo, '루즈-패시브 사분면');
 });
 
+test('핸드 태그와 3단계 표시', function () {
+  const mk = function (o) { return Object.assign({ street: 'flop', spot: 'vsBet', raisesBefore: 2, evLossBb: 1, chosen: { type: 'call' }, best: { type: 'fold' } }, o); };
+  eq(H.review.tagsOf([mk({})]).join(','), 'overCall');
+  eq(H.review.tagsOf([mk({ chosen: { type: 'fold' }, best: { type: 'call' } })]).join(','), 'overFold');
+  eq(H.review.tagsOf([mk({ chosen: { type: 'check' }, best: { type: 'raise' } })]).join(','), 'missedValue');
+  eq(H.review.tagsOf([mk({ street: 'preflop', raisesBefore: 3, evLossBb: 0 })]).join(','), 'threeBetPot');
+  eq(H.review.tagsOf([mk({ evLossBb: 0.2 })]).length, 0, '작은 손실은 태그 없음');
+  eq(H.review.level('good'), 'best'); eq(H.review.level('ok'), 'fine'); eq(H.review.level('blunder'), 'leak');
+});
+test('프로파일: 최근 정확도 창 · 드릴 카드 · 드릴 로그 · 연속 학습일 · 주간 정확도', function () {
+  const p = H.profile.create();
+  const mk = function (loss, pos) { return { street: 'flop', spot: 'vsBet', position: pos || 'BB', evLossBb: loss, verdict: loss >= 0.6 ? 'mistake' : 'good', cards: [], board: [], chosen: { type: 'call' }, best: { type: 'fold' } }; };
+  for (let i = 0; i < 25; i++) p.addHand([mk(i % 2 ? 1.2 : 0.1, i % 3 ? 'BB' : 'SB')]);
+  eq(p.acc['flop/vsBet'].length, 20, '창은 20개');
+  const card = p.drillCard();
+  assert(card && card.key === 'flop/vsBet' && card.pos === 'BB', JSON.stringify(card));
+  assert(card.accuracy > 0.4 && card.accuracy < 0.7, '정확도 ' + card.accuracy);
+  eq(card.goal, 'drill.goal.vsBet');
+  assert(H.i18n.t(card.goal).indexOf('drill.') < 0);
+  /* 드릴 로그와 연속 학습일 */
+  p.addDrill('flop/vsBet', 0.1, { date: '2026-09-15' });
+  p.addDrill('flop/vsBet', 1.0, { date: '2026-09-16' });
+  p.addDrill('flop/vsBet', 0.2, { date: '2026-09-17' });
+  eq(p.drillLog.length, 3);
+  eq(p.streak('2026-09-17'), 3);
+  eq(p.streak('2026-09-18'), 3, '오늘 아직 안 했으면 어제까지의 연속');
+  eq(p.streak('2026-09-19'), 0);
+  const wk = p.weekAccuracy('2026-09-17');
+  eq(wk.now.asked, 3); eq(wk.now.correct, 2);
+  const st = p.byStreetAccuracy().filter(function (r) { return r.street === 'flop'; })[0];
+  assert(st.n === 25 && st.acc > 0.4 && st.acc < 0.7, JSON.stringify(st));
+  assert(p.repeatMistakes(3)[0].key === 'flop/vsBet');
+  const p2 = H.profile.create(JSON.parse(JSON.stringify(p.toJSON())));
+  eq(p2.acc['flop/vsBet'].length, 20, '저장/복원');
+  eq(p2.drillLog.length, 3);
+  eq(H.profile.create().drillCard(), null, '약점이 없으면 카드도 없다');
+});
+
 console.log('\n결과: ' + passed + ' 통과, ' + failed + ' 실패\n');
 process.exit(failed ? 1 : 0);

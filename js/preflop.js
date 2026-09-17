@@ -33,6 +33,14 @@
     return posT && posT[situation] ? posT[situation] : null;
   }
 
+  /** 이 포지션에 표가 있는 상황 키 목록 (예: 'open', 'vsOpen:BTN', 'vs3bet:BB') */
+  function situations(n, pos) {
+    const key = tableKey(n);
+    if (!key) return [];
+    const posT = table().tables[key][pos];
+    return posT ? Object.keys(posT) : [];
+  }
+
   function digit(str, idx) { return str ? (str.charCodeAt(idx) - 48) / 9 : 0; }
 
   /** 클래스 하나의 빈도 {fold, call, raise} (없으면 null) */
@@ -92,6 +100,7 @@
     tableKey: tableKey,
     freq: freq,
     weights: weights,
+    situations: situations,
     situationOf: situationOf,
     sizes: function () { return table() ? table().sizes : null; }
   };

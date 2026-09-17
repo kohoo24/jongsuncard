@@ -207,6 +207,9 @@ async function playHands(page, target, opts) {
 
   console.log('\n[패널]');
   await safeClick(page, '.tab[data-tab="stats"]');
+  await page.waitForTimeout(200);
+  const sess = await page.evaluate(function () { const b = document.querySelector('.session-box'); return b ? b.textContent : ''; });
+  check('세션 탭 위에 이번 세션 요약이 있다', /\d/.test(sess) && !/stats\./.test(sess), sess.slice(0, 80));
   await page.waitForTimeout(400);
   const stats = await page.evaluate(function () {
     return {
@@ -270,16 +273,46 @@ async function playHands(page, target, opts) {
   check('UTG 레인지가 버튼보다 좁다', utgIn < btnIn, 'UTG ' + utgIn + ' vs BTN ' + btnIn);
   check('포지션 선택이 유지된다 (내 포지션으로 되돌아가지 않는다)',
     await page.evaluate(function () {
-      return document.querySelector('.pos-btn:nth-child(4)').classList.contains('on');
+      return document.querySelector('.chart-controls .pos-btn:nth-child(4)').classList.contains('on');
     }));
+  /* 상황 전환과 셀 팝오버 */
+  await page.click('.chart-sits [data-sit="vsOpen"]');
+  await page.waitForTimeout(200);
+  await page.click('.chart-controls .pos-btn:last-child');   // BB — 오픈에 콜하는 손이 있는 자리
+  await page.waitForTimeout(200);
+  await page.click('.range-cell:nth-child(20)');
+  await page.waitForTimeout(200);
+  const pop = await page.evaluate(function () {
+    const p = document.querySelector('.range-pop');
+    return { pop: !!p, rows: p ? p.querySelectorAll('.rp-row').length : 0, callCells: document.querySelectorAll('.range-cell.act-call, .range-cell .b-call').length,
+      vs: document.querySelectorAll('.chart-vs .vs-btn').length,
+      picked: document.querySelectorAll('.range-cell.picked').length, untranslated: p ? /chart\./.test(p.textContent) : true };
+  });
+  check('오픈 직면 상황(상대 포지션 선택)에서 셀을 누르면 폴드·콜·3벳 빈도 팝오버가 뜬다', pop.pop && pop.rows === 3 && pop.picked === 1 && pop.callCells > 0 && pop.vs >= 2 && !pop.untranslated, JSON.stringify(pop));
+  await page.click('.chart-sits [data-sit="open"]');
+  await page.waitForTimeout(150);
 
   console.log('\n[핸드 히스토리와 리플레이]');
   await safeClick(page, '.tab[data-tab="review"]');
   await page.waitForTimeout(300);
   const histRows = await page.evaluate(function () { return document.querySelectorAll('.hist-row').length; });
   check('히스토리에 핸드가 쌓인다', histRows >= 5, '행 ' + histRows);
+  const histUi = await page.evaluate(function () {
+    return { filters: document.querySelectorAll('.hist-filters .flt-btn').length, replay: document.querySelectorAll('.hist-row .hist-replay').length,
+      review: document.querySelectorAll('.hist-row .mini-btn').length };
+  });
+  check('히스토리에 필터와 카드별 버튼이 있다', histUi.filters === 4 && histUi.replay >= 5, JSON.stringify(histUi));
+  await page.click('.hist-filters [data-filter="lose"]');
+  await page.waitForTimeout(200);
+  const lostOnly = await page.evaluate(function () {
+    const rows = Array.prototype.slice.call(document.querySelectorAll('.hist-row'));
+    return { n: rows.length, allLose: rows.every(function (r) { return r.classList.contains('lose'); }) };
+  });
+  check('패배 필터는 진 핸드만 남긴다', lostOnly.allLose, JSON.stringify(lostOnly));
+  await page.click('.hist-filters [data-filter="all"]');
+  await page.waitForTimeout(200);
 
-  await safeClick(page, '.hist-row');
+  await safeClick(page, '.hist-row .hist-replay');
   await page.waitForTimeout(300);
   const replay1 = await page.evaluate(function () {
     return document.querySelector('.replay-pos').textContent.trim();
@@ -329,6 +362,16 @@ async function playHands(page, target, opts) {
     });
     check('리뷰 모달이 열린다', review.open);
     check('리뷰에 결정이 나열된다', review.rows >= 1, '항목 ' + review.rows);
+    const review2 = await page.evaluate(function () {
+      const body = document.getElementById('reviewBody');
+      return { hero: !!body.querySelector('.review-hero'), levels: body.querySelectorAll('.rv-level').length,
+        open: body.querySelectorAll('.review-row.open').length, untranslated: /review\.|why\./.test(body.textContent) };
+    });
+    check('리뷰 첫 화면에 EV 손실과 핵심 누수가 있고 타임라인은 3단계 라벨', review2.hero && review2.levels >= 1 && !review2.untranslated, JSON.stringify(review2));
+    /* 타임라인 행은 눌러서 펼친다 */
+    await page.click('#reviewBody .review-row:not(.open) .review-top').catch(function () {});
+    const toggled = await page.evaluate(function () { return document.querySelectorAll('#reviewBody .review-row.open').length; });
+    check('타임라인 행을 누르면 펼쳐진다', toggled >= 1, String(toggled));
     await page.click('#btnReviewClose');
   }
 
@@ -637,9 +680,11 @@ async function playHands(page, target, opts) {
   const learnModal = await page.evaluate(function () {
     const body = document.getElementById('learnBody');
     return { shown: document.getElementById('learnModal').classList.contains('show'), style: !!body.querySelector('.style-card'),
-      sev: body.querySelectorAll('.sev').length };
+      sev: body.querySelectorAll('.sev').length, drillCard: !!body.querySelector('.drill-card'), stats: !!body.querySelector('.learn-stats'),
+      untranslated: /learn\.|drill\./.test(body.textContent) };
   });
   check('학습 현황 화면에 진단 카드와 심각도 배지가 있다', learnModal.shown && learnModal.style && learnModal.sev > 0, JSON.stringify(learnModal));
+  check('학습 현황에 드릴 카드와 학습 통계(연속 학습일)가 있다', learnModal.drillCard && learnModal.stats && !learnModal.untranslated, JSON.stringify(learnModal));
   await page.click('#btnLearnClose');
   await page.waitForTimeout(200);
   /* 같은 날 다시 시작하면 같은 첫 문제 */

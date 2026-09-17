@@ -1073,3 +1073,88 @@ button.act.gold.confirm { background: linear-gradient(180deg, #5a2a26, #3f1c19);
 .learn-table td, .learn-table th { font-size: 12px; }
 .hist-row { font-size: 12px; }
 .tab { font-size: 12.5px; }
+
+/* ---------- 2단계: 리뷰 첫 화면 · 히스토리 복기 큐 · 드릴 카드 · 학습 통계 · 레인지 4색 ---------- */
+.review-hero { background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .09); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+.review-hero.loss { border-color: rgba(240, 107, 99, .35); }
+.review-hero.clean { border-color: rgba(111, 227, 164, .35); }
+.rh-total { display: flex; align-items: baseline; gap: 10px; }
+.rh-label { font-size: 11px; color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; }
+.rh-num { font-size: 24px; line-height: 1.1; }
+.review-hero.loss .rh-num { color: var(--danger); }
+.review-hero.clean .rh-num { color: var(--success); }
+.rh-leak { margin-top: 10px; }
+.rh-spot { font-weight: 700; font-size: 14px; margin-top: 2px; }
+.rh-line { display: flex; gap: 8px; align-items: center; margin-top: 4px; font-size: 13px; flex-wrap: wrap; }
+.rh-you { color: var(--text-2); }
+.rh-arrow { color: var(--muted); }
+.rh-best { color: var(--info); font-weight: 600; }
+.rh-clean { margin-top: 8px; color: var(--success); font-weight: 600; }
+.rh-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.mini-btn.gold { color: var(--gold); border-color: rgba(227, 185, 90, .5); }
+.review-row .review-top { width: 100%; background: none; border: none; color: inherit; font: inherit; text-align: left; cursor: pointer; padding: 0; }
+.review-detail-wrap { display: none; }
+.review-row.open .review-detail-wrap { display: block; }
+.rv-level { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; letter-spacing: .04em; }
+.rv-level.best { background: rgba(111, 227, 164, .18); color: var(--success); }
+.rv-level.fine { background: rgba(255, 255, 255, .08); color: var(--text-2); }
+.rv-level.leak { background: rgba(240, 107, 99, .18); color: var(--danger); }
+.rv-loss.zero { color: var(--text-2); font-weight: 400; }
+.review-row.lv-leak { border-left-color: var(--danger); }
+.review-row.lv-fine { border-left-color: rgba(255, 255, 255, .25); }
+.review-row.lv-best { border-left-color: var(--success); }
+
+.hist-filters { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.hist-row { display: block; width: 100%; }
+.hist-ev { font-size: 11px; color: var(--text-2); margin-left: 8px; }
+.hist-ev.bad { color: var(--danger); font-weight: 600; }
+.hist-sub { display: flex; gap: 8px; font-size: 11.5px; color: var(--text-2); margin-top: 4px; flex-wrap: wrap; }
+.hist-pos { font-weight: 700; color: var(--text); }
+.hist-tags { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.hist-tag { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: rgba(143, 193, 255, .14); color: var(--info); }
+.hist-tag.overCall, .hist-tag.overFold, .hist-tag.missedValue { background: rgba(240, 107, 99, .14); color: #ffb3a8; }
+.hist-actions { display: flex; gap: 4px; margin-top: 6px; }
+
+.drill-card { background: rgba(227, 185, 90, .06); border: 1px solid rgba(227, 185, 90, .3); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; }
+.dc-title { font-size: 11px; color: var(--text-2); letter-spacing: .04em; text-transform: uppercase; }
+.dc-head { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.dc-spot { font-weight: 700; font-size: 14px; }
+.dc-acc { font-size: 13px; margin-top: 4px; }
+.dc-goal { font-size: 12px; color: var(--text-2); margin: 2px 0 8px; }
+.drill-card .act { width: 100%; margin: 0; }
+
+.learn-stats { background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08); border-radius: 12px; padding: 8px 12px 10px; margin-bottom: 12px; }
+.ls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.ls-tile { background: rgba(0, 0, 0, .18); border-radius: 8px; padding: 8px 10px; }
+.ls-label { font-size: 11px; color: var(--text-2); }
+.ls-value { font-size: 16px; font-weight: 700; margin-top: 2px; }
+.ls-sub { font-size: 11px; color: var(--success); }
+.session-box { background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px; padding: 8px 12px; margin-bottom: 10px; }
+.session-line { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12.5px; margin-top: 3px; align-items: baseline; }
+.session-line .neg { color: var(--danger); }
+
+/* 레인지: 4색(폴드 회색 · 오픈/레이즈 골드 · 콜 민트 · 3벳 블루) + 혼합은 비율 띠 */
+.chart-sits { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 8px; }
+.sit-btn, .flt-btn {
+  background: rgba(255, 255, 255, .06); border: 1px solid var(--line); color: var(--text-2);
+  border-radius: 999px; padding: 4px 10px; font-size: 11.5px; font-family: inherit; cursor: pointer;
+}
+.sit-btn.on, .flt-btn.on { background: rgba(255, 255, 255, .16); color: var(--text); border-color: rgba(255, 255, 255, .35); font-weight: 600; }
+.sit-btn:disabled { opacity: .4; cursor: default; }
+.chart-vs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin: 0 0 8px; }
+.chart-vs-label { font-size: 11px; color: var(--text-2); margin-right: 2px; }
+.range-cell { position: relative; overflow: hidden; }
+.range-cell .rc-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; display: flex; }
+.range-cell .rc-bar i { display: block; height: 100%; }
+.range-cell .rc-bar .b-raise { background: var(--gold); }
+.range-cell .rc-bar .b-call { background: var(--success); }
+.range-cell .rc-bar .b-three { background: var(--info); }
+.range-cell.act-call { background: rgba(111, 227, 164, .5); color: var(--text); }
+.range-cell.act-three { background: rgba(143, 193, 255, .5); color: var(--text); }
+.range-cell.picked { outline: 2px solid var(--text); outline-offset: -2px; z-index: 2; }
+.range-pop { background: rgba(0, 0, 0, .35); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-top: 8px; font-size: 12px; }
+.range-pop .rp-key { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.range-pop .rp-row { display: flex; justify-content: space-between; gap: 8px; padding: 1px 0; }
+.range-pop .rp-ctx { color: var(--text-2); font-size: 11px; margin-top: 4px; }
+.legend-item i.sw-call { background: var(--success); height: 10px; border-radius: 2px; }
+.legend-item i.sw-three { background: var(--info); height: 10px; border-radius: 2px; }

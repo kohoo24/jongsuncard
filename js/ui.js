@@ -66,6 +66,8 @@
     profile: null, drill: null,
     coach: null, coachUsed: false, coachSig: '',   // 플레이 도중 "생각 정리" (결정 하나에 한 번)
     allinArmed: false, allinTimer: null,
+    session: { hands: 0, lossBb: 0, byKey: {} },   // 이번 세션 성과 (세션 탭 요약)
+    histFilter: 'all',
     raiseTo: 0     // 레이즈 목표 금액 — 슬라이더는 step 에 맞춰 값을 깎으므로 정확한 값은 따로 든다
   };
   global.HoldemUI = state;
@@ -1271,6 +1273,12 @@
     state.tracker.endHand(g);
     state.lastSummary = H.review.summarize(state.reviewItems, g.bigBlind);
     state.recorder.record(g, { review: state.reviewItems.slice() });
+    state.session.hands++;
+    state.session.lossBb += state.lastSummary.totalBb;
+    state.reviewItems.forEach(function (it) {
+      const k = it.street + '/' + it.spot;
+      state.session.byKey[k] = (state.session.byKey[k] || 0) + it.evLossBb;
+    });
     if (state.profile && state.reviewItems.length) {
       state.profile.addHand(state.reviewItems);
       H.profile.save(state.profile);
@@ -1543,6 +1551,12 @@
       ? T('home.dailyDone', { correct: rec.correct, asked: rec.asked })
       : T('home.dailyTodo');
     $('btnHomeDrillWeak').disabled = !(state.profile && state.profile.drillTarget());
+    const cardHost = $('homeDrill');
+    if (cardHost) {
+      cardHost.innerHTML = '';
+      const card = state.profile ? state.profile.drillCard() : null;
+      if (card) H.panels.renderDrillCard(card, cardHost, function (k) { closeModal('homeModal'); startDrill(k); }, { noButton: true });
+    }
     const st = state.profile && state.profile.lastStyle;
     const line = $('homeStyle');
     line.textContent = st
@@ -1615,8 +1629,8 @@
     }
     if (!state.game) return;
     if (state.tab === 'log') H.panels.renderLog(state.game, host, { currentHand: true });
-    else if (state.tab === 'stats') H.panels.renderStats(state.tracker, state.game, host, HERO_ID);
-    else if (state.tab === 'review') H.panels.renderReviewTab(state.lastSummary, state.recorder, host, HERO_ID, openReplay);
+    else if (state.tab === 'stats') H.panels.renderStats(state.tracker, state.game, host, HERO_ID, state.drill ? null : state.session);
+    else if (state.tab === 'review') H.panels.renderReviewTab(state.lastSummary, state.recorder, host, HERO_ID, reviewOpts());
     else if (state.tab === 'chart') {
       state.chartState.playerCount = state.game.players.length;
       const hero = state.game.byId(HERO_ID);
@@ -1639,9 +1653,30 @@
   }
   function closeModal(id) { $(id).classList.remove('show'); }
 
+  /* 리뷰에서 이어지는 행동: 레인지 보기(그 포지션의 차트 탭) · 유사 상황 훈련(그 자리 드릴) */
+  function reviewOpts() {
+    return {
+      onRange: function (item) {
+        closeModal('reviewModal');
+        if (item && item.position) { state.chartState.position = item.position; state.chartState.userPicked = true; }
+        state.chartState.situation = item && item.street === 'preflop' ? (item.raisesBefore >= 3 ? 'vs3bet' : item.raisesBefore === 2 ? 'vsOpen' : 'open') : 'open';
+        if ($('sidePanel').classList.contains('hidden')) setPanelOpen(true);
+        switchTab('chart');
+      },
+      onDrill: function (key) { closeModal('reviewModal'); startDrill(key); },
+      onOpen: openReplay,
+      onReview: function (hand) {
+        const sum = H.review.summarize(hand.review || [], hand.bb);
+        H.panels.renderReview(sum, $('reviewBody'), reviewOpts());
+        openModal('reviewModal');
+      },
+      filter: state.histFilter,
+      onFilter: function (f) { state.histFilter = f; refreshPanel(); }
+    };
+  }
   function openReview() {
     if (!state.lastSummary) return;
-    H.panels.renderReview(state.lastSummary, $('reviewBody'));
+    H.panels.renderReview(state.lastSummary, $('reviewBody'), reviewOpts());
     openModal('reviewModal');
   }
   function openReplay(hand) {
@@ -1789,6 +1824,8 @@
   }
 
   /* ==================== 게임 시작 / 복원 ==================== */
+  function resetSession() { state.session = { hands: 0, lossBb: 0, byKey: {} }; state.histFilter = 'all'; }
+
   function applySettings(s) {
     state.settings = s;
     state.sound = s.sound !== false;
@@ -1803,6 +1840,7 @@
   }
 
   function startGame(s) {
+    resetSession();
     clearTimer(); stopClockTick();
     applySettings(s);
     H.storage.clearSession();

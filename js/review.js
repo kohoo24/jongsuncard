@@ -246,6 +246,29 @@
     return item;
   }
 
+  /*
+   * 핸드 태그 (히스토리의 복기 큐용). 리뷰 항목에서 자동으로 뽑는다.
+   *   3벳 팟 · 과콜(콜 → 폴드 권장) · 과다 폴드(폴드 → 콜/레이즈 권장) · 미스 밸류(체크/콜 → 레이즈 권장)
+   */
+  function tagsOf(items) {
+    const tags = {};
+    (items || []).forEach(function (it) {
+      if (!it || !it.best || !it.chosen) return;
+      if (it.street === 'preflop' && it.raisesBefore >= 3) tags.threeBetPot = true;
+      const leak = it.evLossBb >= 0.6;
+      if (!leak) return;
+      if (it.chosen.type === 'call' && it.best.type === 'fold') tags.overCall = true;
+      else if (it.chosen.type === 'fold' && (it.best.type === 'call' || it.best.type === 'raise')) tags.overFold = true;
+      else if ((it.chosen.type === 'check' || it.chosen.type === 'call') && it.best.type === 'raise') tags.missedValue = true;
+    });
+    return Object.keys(tags);
+  }
+
+  /** 표시용 3단계: Best(좋음) · Fine(무난) · Leak(실수·큰 실수) */
+  function level(verdict) {
+    return verdict === 'good' ? 'best' : verdict === 'ok' ? 'fine' : 'leak';
+  }
+
   /** 핸드 전체 요약 */
   function summarize(items, bigBlind) {
     if (!items || !items.length) {
@@ -273,6 +296,8 @@
     explain: explain,
     reason: reason,
     preview: preview,
+    tagsOf: tagsOf,
+    level: level,
     classify: classify,
     summarize: summarize,
     actionLabel: actionLabel,

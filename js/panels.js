@@ -90,8 +90,21 @@
     host.appendChild(icmList);
   }
 
-  H.panels.renderStats = function (tracker, game, host, heroId) {
+  H.panels.renderStats = function (tracker, game, host, heroId, session) {
     host.innerHTML = '';
+    /* 세션 성과 요약: 핸드 수 · EV 손실 · 가장 큰 누수 (학습 통계는 훈련 탭에) */
+    if (session && session.hands) {
+      const box = el('div', 'session-box');
+      box.appendChild(el('div', 'ls-label', T('stats.session')));
+      const line = el('div', 'session-line');
+      line.appendChild(el('b', null, session.hands + ' ' + T('stats.hands')));
+      line.appendChild(el('span', session.lossBb >= 1 ? 'neg' : null, T('stats.sessionLoss', { bb: (session.lossBb > 0 ? '-' : '') + session.lossBb.toFixed(1) })));
+      let worstKey = null, worstLoss = 0;
+      Object.keys(session.byKey || {}).forEach(function (k) { if (session.byKey[k] > worstLoss) { worstLoss = session.byKey[k]; worstKey = k; } });
+      line.appendChild(el('span', 'muted', worstKey && worstLoss >= 0.6 ? T('stats.biggestLeak', { spot: spotLabel(worstKey) }) : T('stats.noLeak')));
+      box.appendChild(line);
+      host.appendChild(box);
+    }
     const rows = tracker.all().filter(function (s) { return s.hands > 0; });
     if (!rows.length) {
       host.appendChild(el('p', 'empty', T('stats.empty')));
@@ -324,52 +337,119 @@
 
 
   /* ==================== 핸드 히스토리 ==================== */
-  H.panels.renderHistory = function (recorder, host, heroId, onOpen) {
+  /*
+   * 핸드 히스토리 = 복기 큐. 필터(전체 · 큰 손실 · 승리 · 패배), 자동 태그, 카드마다 리뷰 · 리플레이 · 드릴 생성.
+   */
+  const HIST_FILTERS = ['all', 'loss', 'win', 'lose'];
+  H.panels.renderHistory = function (recorder, host, heroId, onOpen, opts) {
+    opts = opts || {};
     host.innerHTML = '';
     if (!recorder.length()) {
       host.appendChild(el('p', 'empty', T('hist.empty')));
       return;
     }
+    const filter = opts.filter || 'all';
+    const bar = el('div', 'hist-filters');
+    HIST_FILTERS.forEach(function (f) {
+      const b = el('button', 'flt-btn' + (f === filter ? ' on' : ''), T('hist.filter.' + f));
+      b.type = 'button'; b.dataset.filter = f;
+      b.addEventListener('click', function () { if (opts.onFilter) opts.onFilter(f); });
+      bar.appendChild(b);
+    });
+    host.appendChild(bar);
+
     const list = el('div', 'hist-list');
+    let shown = 0;
     recorder.hands.slice().reverse().forEach(function (hand) {
       const net = recorder.netOf(hand, heroId);
-      const row = el('button', 'hist-row' + (net > 0 ? ' win' : net < 0 ? ' lose' : ''));
-      row.type = 'button';
+      const items = hand.review || [];
+      const lossBb = items.reduce(function (a, it) { return a + (it.evLossBb || 0); }, 0);
+      if (filter === 'loss' && lossBb < 0.6) return;
+      if (filter === 'win' && net <= 0) return;
+      if (filter === 'lose' && net >= 0) return;
+      shown++;
+      const row = el('div', 'hist-row' + (net > 0 ? ' win' : net < 0 ? ' lose' : ''));
       const head = el('div', 'hist-head');
       head.appendChild(el('span', 'hist-no', T('hist.handNo', { n: hand.no })));
+      if (items.length) head.appendChild(el('span', 'hist-ev' + (lossBb >= 0.6 ? ' bad' : ''), T('hist.evLoss', { bb: (lossBb > 0 ? '-' : '') + lossBb.toFixed(1) })));
       head.appendChild(el('span', 'hist-net', (net > 0 ? '+' : '') + num(net)));
       row.appendChild(head);
 
       const board = el('div', 'hist-board');
-      if (hand.community.length) {
-        hand.community.forEach(function (c) { board.appendChild(miniCard(c)); });
-      } else {
-        board.appendChild(el('span', 'muted', T('street.preflop')));
+      const seat = hand.seats.filter(function (x) { return x.id === heroId; })[0];
+      if (seat && seat.cards.length) {
+        seat.cards.forEach(function (c) { board.appendChild(miniCard(c)); });
+        board.appendChild(el('span', 'muted', ' | '));
       }
+      if (hand.community.length) hand.community.forEach(function (c) { board.appendChild(miniCard(c)); });
+      else board.appendChild(el('span', 'muted', T('street.preflop')));
       row.appendChild(board);
 
-      const seat = hand.seats.filter(function (s) { return s.id === heroId; })[0];
-      if (seat && seat.cards.length) {
-        const mine = el('div', 'hist-mine');
-        seat.cards.forEach(function (c) { mine.appendChild(miniCard(c)); });
-        mine.appendChild(el('span', 'muted', seat.position));
-        row.appendChild(mine);
+      /* 한 줄 요약: 포지션 · 스트리트별 내 액션 · 태그 */
+      const sub = el('div', 'hist-sub');
+      if (seat) sub.appendChild(el('span', 'hist-pos', seat.position));
+      const line = [];
+      items.forEach(function (it) { line.push(T('street.' + it.street) + ' ' + H.review.actionLabel(it.chosen)); });
+      if (line.length) sub.appendChild(el('span', 'hist-line', line.join(' · ')));
+      row.appendChild(sub);
+      const tags = H.review.tagsOf(items);
+      if (tags.length) {
+        const tg = el('div', 'hist-tags');
+        tags.forEach(function (t) { tg.appendChild(el('span', 'hist-tag ' + t, T('hist.tag.' + t))); });
+        row.appendChild(tg);
       }
-      row.addEventListener('click', function () { onOpen(hand); });
+
+      const acts = el('div', 'hist-actions');
+      if (items.length && opts.onReview) {
+        const b = el('button', 'mini-btn', T('hist.review')); b.type = 'button';
+        b.addEventListener('click', function () { opts.onReview(hand); });
+        acts.appendChild(b);
+      }
+      const rb = el('button', 'mini-btn', T('hist.replay')); rb.type = 'button'; rb.className = 'mini-btn hist-replay';
+      rb.addEventListener('click', function () { if (onOpen) onOpen(hand); });
+      acts.appendChild(rb);
+      if (items.length && opts.onDrill) {
+        let worst = items[0];
+        items.forEach(function (it) { if (it.evLossBb > worst.evLossBb) worst = it; });
+        if (worst.evLossBb >= 0.15) {
+          const b = el('button', 'mini-btn', T('hist.drill')); b.type = 'button';
+          b.addEventListener('click', function () { opts.onDrill(worst.street + '/' + worst.spot); });
+          acts.appendChild(b);
+        }
+      }
+      row.appendChild(acts);
       list.appendChild(row);
     });
+    if (!shown) list.appendChild(el('p', 'empty', T('hist.noneFiltered')));
     host.appendChild(list);
   };
 
   /* ==================== 프리플랍 차트 ==================== */
+  /*
+   * 레인지 차트. 상황(오픈 · 오픈 직면 · 3벳 직면) × 포지션. 솔버 표가 있으면 셀마다 폴드/콜/레이즈
+   * 빈도를 4색으로 — 주 액션이 배경, 혼합은 아래 비율 띠. 셀을 누르면 빈도 팝오버.
+   */
+  const CHART_SITS = ['open', 'vsOpen', 'vs3bet'];
   H.panels.renderChart = function (host, state) {
     host.innerHTML = '';
     const R = H.ranges;
-    /* 이 테이블 인원에 등장하는 포지션만 (6인: 6개, 9인: 9개) */
     const positions = R.POSITION_ORDER.filter(function (p) {
       return R.positionsFor(state.playerCount || 6).indexOf(p) >= 0;
     });
     if (positions.indexOf(state.position) < 0) state.position = positions[0];
+    if (CHART_SITS.indexOf(state.situation) < 0) state.situation = 'open';
+    const n = state.playerCount || 6;
+    const hasSolver = H.preflop && H.preflop.available();
+
+    const sits = el('div', 'chart-sits');
+    CHART_SITS.forEach(function (sit) {
+      const b = el('button', 'sit-btn' + (state.situation === sit ? ' on' : ''), T('chart.sit.' + sit));
+      b.type = 'button'; b.dataset.sit = sit;
+      b.disabled = !hasSolver && sit !== 'open';
+      b.addEventListener('click', function () { state.situation = sit; state.picked = null; H.panels.renderChart(host, state); });
+      sits.appendChild(b);
+    });
+    host.appendChild(sits);
     const bar = el('div', 'chart-controls');
     positions.forEach(function (pos) {
       const b = el('button', 'pos-btn' + (state.position === pos ? ' on' : ''), T('pos.' + pos));
@@ -383,55 +463,104 @@
     });
     host.appendChild(bar);
 
-    const n = state.playerCount || 6;
-    /* 솔버 표가 있으면 오픈 빈도(혼합 전략)를 음영으로, 없으면 휴리스틱 임계값 */
-    const solver = H.preflop && H.preflop.available() ? H.preflop.weights(n, state.position, 'open', 'raise') : null;
+    /* 오픈 직면 · 3벳 직면은 상대 포지션이 필요하다 (표는 'vsOpen:BTN' 처럼 상대별) */
+    const sit = state.situation;
+    let sitKey = sit, vsOpts = [];
+    if (sit !== 'open' && hasSolver) {
+      vsOpts = H.preflop.situations(n, state.position)
+        .filter(function (k) { return k.indexOf(sit + ':') === 0; })
+        .map(function (k) { return k.split(':')[1]; })
+        .sort(function (a, b) { return R.POSITION_ORDER.indexOf(a) - R.POSITION_ORDER.indexOf(b); });
+      if (vsOpts.length) {
+        if (vsOpts.indexOf(state.vsPos) < 0) state.vsPos = vsOpts.indexOf('BTN') >= 0 ? 'BTN' : vsOpts[vsOpts.length - 1];
+        sitKey = sit + ':' + state.vsPos;
+        const vbar = el('div', 'chart-vs');
+        vbar.appendChild(el('span', 'chart-vs-label', T('chart.vsLabel')));
+        vsOpts.forEach(function (vp) {
+          const b = el('button', 'sit-btn vs-btn' + (state.vsPos === vp ? ' on' : ''), T('pos.' + vp));
+          b.type = 'button'; b.dataset.vs = vp;
+          b.addEventListener('click', function () { state.vsPos = vp; state.picked = null; H.panels.renderChart(host, state); });
+          vbar.appendChild(b);
+        });
+        host.appendChild(vbar);
+      }
+    }
+    const raiseW = hasSolver ? H.preflop.weights(n, state.position, sitKey, 'raise') : null;
+    const callW = hasSolver ? H.preflop.weights(n, state.position, sitKey, 'call') : null;
+    const solver = !!(raiseW && callW);
+    const raiseIsThree = sit !== 'open';
+    const sitLabel = T('chart.sit.' + sit) + (sit !== 'open' && solver ? ' (' + T('pos.' + state.vsPos) + ')' : '');
     let openPct = R.openPercent(state.position, n);
     if (solver) {
       let mass = 0;
-      for (let i = 0; i < solver.length; i++) mass += solver[i] * R.INFO[R.RANKED[i][0]].combos;
+      for (let i = 0; i < raiseW.length; i++) mass += (raiseW[i] + callW[i]) * R.INFO[R.RANKED[i][0]].combos;
       openPct = mass / 1326;
     }
     host.appendChild(el('p', 'chart-note',
-      T('pos.' + state.position) + ' · ' + T('chart.pct', { pct: Math.round(openPct * 100) }) +
-      (solver ? ' · ' + T('chart.solver') : '')));
+      T('chart.ctx', { pos: T('pos.' + state.position), sit: sitLabel, n: n }) + ' · ' + T('chart.stack') + ' · ' +
+      T('chart.pct', { pct: Math.round(openPct * 100) }) + (solver ? ' · ' + T('chart.solver') : '')));
+    if (!solver && sit !== 'open') host.appendChild(el('p', 'learn-note', T('chart.noSolverSit')));
 
     const grid = el('div', 'range-grid');
     R.chartGrid().forEach(function (row) {
       row.forEach(function (key) {
         const info = R.INFO[key];
-        const f = solver ? solver[info.index] : (info.pct <= openPct ? 1 : 0);
-        const cell = el('div', 'range-cell' + (f >= 0.67 ? ' in' : f > 0.05 ? ' mix' : ''), key);
-        if (f > 0.05 && f < 0.67) cell.style.setProperty('--f', f.toFixed(2));
+        let r, c;
+        if (solver) { r = raiseW[info.index]; c = callW[info.index]; }
+        else { r = info.pct <= openPct ? 1 : 0; c = 0; }
+        const f = r + c;
+        const main = f < 0.05 ? 'fold' : (r >= c ? 'raise' : 'call');
+        let cls = 'range-cell';
+        if (main === 'raise') cls += f >= 0.67 ? ' in' : ' mix';
+        else if (main === 'call') cls += f >= 0.67 ? ' act-call' : ' mix';
+        if (raiseIsThree && main === 'raise' && f >= 0.67) cls = 'range-cell act-three';
+        const cell = el('div', cls, key);
+        if (main !== 'fold' && f < 0.67) cell.style.setProperty('--f', f.toFixed(2));
+        if (solver && f >= 0.05 && (r > 0.05 && c > 0.05 || f < 0.95)) {
+          const barEl = el('div', 'rc-bar');
+          if (r > 0.02) { const i1 = el('i', raiseIsThree ? 'b-three' : 'b-raise'); i1.style.width = Math.round(r * 100) + '%'; barEl.appendChild(i1); }
+          if (c > 0.02) { const i2 = el('i', 'b-call'); i2.style.width = Math.round(c * 100) + '%'; barEl.appendChild(i2); }
+          cell.appendChild(barEl);
+        }
         if (state.heroKey === key) cell.classList.add('mine');
-        cell.title = key + ' · ' + T('chart.pct', { pct: (info.pct * 100).toFixed(1) }) +
-          (solver ? ' · ' + T('chart.freq', { pct: Math.round(f * 100) }) : '');
+        if (state.picked === key) cell.classList.add('picked');
+        cell.title = key + ' · ' + T('chart.pct', { pct: (info.pct * 100).toFixed(1) });
+        cell.addEventListener('click', function () { state.picked = state.picked === key ? null : key; H.panels.renderChart(host, state); });
         grid.appendChild(cell);
       });
     });
     host.appendChild(grid);
 
+    /* 팝오버: 고른 셀의 빈도 */
+    if (state.picked) {
+      const info = R.INFO[state.picked];
+      const fq = solver ? H.preflop.freq(n, state.position, sitKey, state.picked) : { raise: info.pct <= openPct ? 1 : 0, call: 0, fold: info.pct <= openPct ? 0 : 1 };
+      const pop = el('div', 'range-pop');
+      pop.appendChild(el('div', 'rp-key', state.picked + ' · ' + T('chart.pct', { pct: (info.pct * 100).toFixed(1) })));
+      const rows = [['fold', fq.fold], [raiseIsThree ? (sit === 'vs3bet' ? 'fourBet' : 'threeBet') : 'raise', fq.raise]];
+      if (sit !== 'open') rows.splice(1, 0, ['call', fq.call]);
+      rows.forEach(function (rw) {
+        const line = el('div', 'rp-row');
+        line.appendChild(el('span', null, T('chart.' + rw[0])));
+        line.appendChild(el('b', null, Math.round(rw[1] * 100) + '%'));
+        pop.appendChild(line);
+      });
+      pop.appendChild(el('div', 'rp-ctx', T('chart.ctx', { pos: T('pos.' + state.position), sit: sitLabel, n: n }) + ' · ' + T('chart.stack')));
+      host.appendChild(pop);
+    } else {
+      host.appendChild(el('p', 'learn-note', T('chart.pickHint')));
+    }
+
     const legend = el('div', 'legend');
-    const a = el('span', 'legend-item');
-    const ai = el('i'); ai.className = 'sw-in'; a.appendChild(ai);
-    a.appendChild(document.createTextNode(T('chart.inRange')));
-    const b2 = el('span', 'legend-item');
-    const bi = el('i'); bi.className = 'sw-out'; b2.appendChild(bi);
-    b2.appendChild(document.createTextNode(T('chart.outRange')));
-    legend.appendChild(a);
-    if (solver) {
-      const m = el('span', 'legend-item');
-      const mi = el('i'); mi.className = 'sw-mix'; m.appendChild(mi);
-      m.appendChild(document.createTextNode(T('chart.mixed')));
-      legend.appendChild(m);
-    }
-    legend.appendChild(b2);
-    if (state.heroKey) {
-      const c = el('span', 'legend-item');
-      const ci = el('i'); ci.className = 'sw-mine'; c.appendChild(ci);
-      c.appendChild(document.createTextNode(T('chart.yourHand') + ' ' + state.heroKey));
-      legend.appendChild(c);
-    }
+    const item = function (cls, text) {
+      const a = el('span', 'legend-item'); const i = el('i'); i.className = cls; a.appendChild(i);
+      a.appendChild(document.createTextNode(text)); legend.appendChild(a);
+    };
+    item(raiseIsThree ? 'sw-three' : 'sw-in', raiseIsThree ? T(sit === 'vs3bet' ? 'chart.fourBet' : 'chart.threeBet') : T('chart.raise'));
+    if (sit !== 'open') item('sw-call', T('chart.call'));
+    if (solver) item('sw-mix', T('chart.mixed'));
+    item('sw-out', T('chart.fold'));
+    if (state.heroKey) item('sw-mine', T('chart.yourHand') + ' ' + state.heroKey);
     host.appendChild(legend);
   };
 
@@ -459,6 +588,76 @@
     return b;
   }
 
+  /* 개인화 드릴 카드: "BB · 플랍 벳에 직면 · 최근 20회 정확도 42% · 목표" */
+  H.panels.renderDrillCard = function (card, host, onDrill, opts) {
+    opts = opts || {};
+    const box = el('div', 'drill-card');
+    box.appendChild(el('div', 'dc-title', T('drill.card.title')));
+    if (!card) {
+      box.appendChild(el('p', 'learn-note', T('drill.card.none')));
+      host.appendChild(box);
+      return box;
+    }
+    const head = el('div', 'dc-head');
+    head.appendChild(sevBadge(card.avg));
+    head.appendChild(el('span', 'dc-spot', (card.pos ? T('pos.' + card.pos) + ' · ' : '') + spotLabel(card.key)));
+    box.appendChild(head);
+    box.appendChild(el('div', 'dc-acc', card.accuracy != null && card.n >= 3
+      ? T('drill.card.acc', { n: card.n, pct: Math.round(card.accuracy * 100) })
+      : T('drill.card.noAcc', { n: card.n })));
+    box.appendChild(el('div', 'dc-goal', T('drill.card.goal', { goal: T(card.goal) })));
+    if (!opts.noButton) {
+      const b = el('button', 'act gold', T('drill.card.start')); b.type = 'button'; b.id = opts.id || 'btnDrillCard';
+      b.addEventListener('click', function () { onDrill(card.key); });
+      box.appendChild(b);
+    }
+    host.appendChild(box);
+    return box;
+  };
+
+  /* 학습 통계: 최근 7일 드릴 정확도(추이) · 스트리트별 정확도 · 반복 실수 · 연속 학습일 */
+  H.panels.renderLearnStats = function (profile, host) {
+    const card = el('div', 'learn-stats');
+    card.appendChild(el('h4', 'panel-sub', T('learn.stats')));
+    const grid = el('div', 'ls-grid');
+    const tile = function (label, value, sub) {
+      const t = el('div', 'ls-tile');
+      t.appendChild(el('div', 'ls-label', label));
+      t.appendChild(el('div', 'ls-value', value));
+      if (sub) t.appendChild(el('div', 'ls-sub', sub));
+      grid.appendChild(t);
+    };
+    const wk = profile.weekAccuracy();
+    tile(T('learn.week'), wk.now.asked ? T('learn.weekVal', { pct: Math.round(wk.now.pct * 100), n: wk.now.asked }) : T('learn.weekNone'),
+      (wk.before.asked && wk.now.asked) ? T('learn.weekTrend', { before: Math.round(wk.before.pct * 100), now: Math.round(wk.now.pct * 100) }) : null);
+    tile(T('learn.streak'), T('learn.streakVal', { n: profile.streak() }));
+    card.appendChild(grid);
+    const streets = profile.byStreetAccuracy().filter(function (r) { return r.n > 0; });
+    if (streets.length) {
+      card.appendChild(el('div', 'ls-label', T('learn.byStreet')));
+      const rows = el('div', 'style-rows');
+      streets.forEach(function (r) {
+        const row = el('div', 'style-row ' + (r.acc >= 0.8 ? 's-ok' : r.acc >= 0.6 ? 's-high' : 's-low'));
+        row.appendChild(el('span', 'sr-name', T('street.' + r.street)));
+        const bar = el('div', 'sr-bar');
+        const fill = el('div', 'sr-band'); fill.style.left = '0'; fill.style.width = Math.round(r.acc * 100) + '%';
+        bar.appendChild(fill);
+        row.appendChild(bar);
+        row.appendChild(el('span', 'sr-val', Math.round(r.acc * 100) + '%'));
+        rows.appendChild(row);
+      });
+      card.appendChild(rows);
+    }
+    const rep = profile.repeatMistakes(3);
+    if (rep.length) {
+      card.appendChild(el('div', 'ls-label', T('learn.repeat')));
+      const ul = el('ul', 'style-tips');
+      rep.forEach(function (r) { ul.appendChild(el('li', null, spotLabel(r.key) + ' · ' + T('learn.repeatN', { n: r.n }))); });
+      card.appendChild(ul);
+    }
+    host.appendChild(card);
+  };
+
   H.panels.renderLearn = function (profile, host, opts) {
     opts = opts || {};
     const onDrill = opts.onDrill || function () {};
@@ -467,7 +666,9 @@
     if (opts.style) H.panels.renderStyle(opts.style, host, { hands: opts.styleHands || 0 });
     else if (profile.lastStyle) H.panels.renderStyle(profile.lastStyle, host, { saved: true });
     else H.panels.renderStyle(null, host, { hands: opts.styleHands || 0 });
+    H.panels.renderDrillCard(profile.drillCard(), host, onDrill);
     H.panels.renderDaily(profile, host, { onDaily: opts.onDaily });
+    if (profile.decisions || profile.drillLog.length) H.panels.renderLearnStats(profile, host);
     host.appendChild(el('h4', 'panel-sub', T('learn.title')));
 
     const target = profile.drillTarget();
@@ -831,57 +1032,95 @@
   };
 
   /* ==================== 리뷰 탭: 지난 핸드 리뷰 + 과거 핸드 ==================== */
-  H.panels.renderReviewTab = function (summary, recorder, host, heroId, onOpen) {
+  H.panels.renderReviewTab = function (summary, recorder, host, heroId, opts) {
+    opts = opts || {};
     host.innerHTML = '';
     host.appendChild(el('h4', 'panel-sub', T('review.lastHand')));
     const box = el('div', 'review-tab-last');
-    if (summary && summary.items.length) H.panels.renderReview(summary, box);
+    if (summary && summary.items.length) H.panels.renderReview(summary, box, opts);
     else box.appendChild(el('p', 'empty', T('review.noneYet')));
     host.appendChild(box);
     host.appendChild(el('h4', 'panel-sub', T('review.pastHands')));
     const past = el('div');
-    H.panels.renderHistory(recorder, past, heroId, onOpen);
+    H.panels.renderHistory(recorder, past, heroId, opts.onOpen, opts);
     host.appendChild(past);
   };
 
   /* ==================== 핸드 리뷰 ==================== */
-  H.panels.renderReview = function (summary, host) {
+  /*
+   * 첫 화면은 "가장 중요한 학습 하나": 총 EV 손실 → 핵심 누수(가장 큰 손실 결정)와 권장·이유 →
+   * 타임라인(3단계 Best · Fine · Leak, 핵심 누수만 펼침) → 레인지 보기 · 유사 상황 훈련
+   */
+  H.panels.renderReview = function (summary, host, opts) {
+    opts = opts || {};
     host.innerHTML = '';
     if (!summary || !summary.items.length) {
       host.appendChild(el('p', 'empty', T('review.noData')));
       return;
     }
-    const head = el('div', 'review-head' + (summary.total > 0 ? ' loss' : ' clean'), summary.text);
+    const worst = summary.worst;
+    const head = el('div', 'review-hero' + (summary.total > 0 ? ' loss' : ' clean'));
+    const total = el('div', 'rh-total');
+    total.appendChild(el('span', 'rh-label', T('review.evTotal')));
+    total.appendChild(el('b', 'rh-num', (summary.totalBb > 0 ? '-' : '') + summary.totalBb.toFixed(1) + ' bb'));
+    head.appendChild(total);
+    if (worst) {
+      const leak = el('div', 'rh-leak');
+      leak.appendChild(el('div', 'rh-label', T('review.keyLeak')));
+      leak.appendChild(el('div', 'rh-spot', T('street.' + worst.street) + ' · ' + T('spot.' + worst.spot) + (worst.position ? ' · ' + T('pos.' + worst.position) : '')));
+      const line = el('div', 'rh-line');
+      line.appendChild(el('span', 'rh-you', T('review.yourAction', { action: H.review.actionLabel(worst.chosen) })));
+      line.appendChild(el('span', 'rh-arrow', '→'));
+      line.appendChild(el('span', 'rh-best', T('review.recommend') + ': ' + H.review.actionLabel(worst.best)));
+      leak.appendChild(line);
+      leak.appendChild(whyLine(worst));
+      head.appendChild(leak);
+    } else {
+      head.appendChild(el('div', 'rh-clean', T('review.cleanHand')));
+    }
+    const actions = el('div', 'rh-actions');
+    if (worst && opts.onRange) {
+      const b = el('button', 'mini-btn', T('review.showRange')); b.type = 'button'; b.id = 'btnReviewRange';
+      b.addEventListener('click', function () { opts.onRange(worst); });
+      actions.appendChild(b);
+    }
+    if (worst && opts.onDrill) {
+      const b = el('button', 'mini-btn gold', T('review.drillSimilar')); b.type = 'button'; b.id = 'btnReviewDrill';
+      b.addEventListener('click', function () { opts.onDrill(worst.street + '/' + worst.spot); });
+      actions.appendChild(b);
+    }
+    if (actions.childElementCount) head.appendChild(actions);
     host.appendChild(head);
 
+    host.appendChild(el('h4', 'panel-sub', T('review.timeline')));
     summary.items.forEach(function (it) {
-      const row = el('div', 'review-row v-' + it.verdict);
-      const top = el('div', 'review-top');
-      top.appendChild(el('span', 'rv-icon', it.verdictIcon));
+      const lv = H.review.level(it.verdict);
+      const open = it === worst;
+      const row = el('div', 'review-row v-' + it.verdict + ' lv-' + lv + (open ? ' open' : ''));
+      const top = el('button', 'review-top'); top.type = 'button';
+      top.setAttribute('aria-expanded', String(open));
+      top.appendChild(el('span', 'rv-level ' + lv, T('review.level.' + lv)));
       top.appendChild(el('span', 'rv-street', T('street.' + it.street)));
-      top.appendChild(el('span', 'rv-action',
-        T('review.yourAction', { action: H.review.actionLabel(it.chosen) })));
-      if (it.evLoss > 0.15 * it.bb) {
-        top.appendChild(el('span', 'rv-loss', '-' + num(it.evLoss)));
-      }
+      top.appendChild(el('span', 'rv-action', H.review.actionLabel(it.chosen)));
+      if (it.coached) top.appendChild(el('span', 'rv-coached', T('coach.used')));
+      top.appendChild(el('span', 'rv-loss' + (it.evLossBb < 0.15 ? ' zero' : ''), (it.evLossBb >= 0.15 ? '-' : '') + it.evLossBb.toFixed(1) + ' bb'));
       row.appendChild(top);
-
-      const detail = el('div', 'review-detail');
-      detail.appendChild(el('span', null, H.review.explain(it)));
-      if (it.coached) detail.appendChild(el('span', 'rv-coached', T('coach.used')));
+      const detail = el('div', 'review-detail-wrap');
+      const d1 = el('div', 'review-detail');
+      d1.appendChild(el('span', null, H.review.explain(it)));
       if (it.best && (it.best.type !== it.chosen.type || it.best.amount !== it.chosen.amount)) {
-        detail.appendChild(el('span', 'rv-best', '→ ' + H.review.actionLabel(it.best)));
+        d1.appendChild(el('span', 'rv-best', '→ ' + H.review.actionLabel(it.best)));
+      }
+      detail.appendChild(d1);
+      detail.appendChild(whyLine(it));
+      if (it.draws && it.draws.outs > 0) {
+        detail.appendChild(el('div', 'review-draws', T('ctl.outs', { n: it.draws.outs, name: it.draws.labels[0] || '', pct: Math.round(it.draws.byRiver * 100) })));
       }
       row.appendChild(detail);
-
-      if (it.draws && it.draws.outs > 0) {
-        row.appendChild(el('div', 'review-draws',
-          T('ctl.outs', {
-            n: it.draws.outs,
-            name: it.draws.labels[0] || '',
-            pct: Math.round(it.draws.byRiver * 100)
-          })));
-      }
+      top.addEventListener('click', function () {
+        const now = row.classList.toggle('open');
+        top.setAttribute('aria-expanded', String(now));
+      });
       host.appendChild(row);
     });
   };

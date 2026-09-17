@@ -44,6 +44,9 @@
     this.updated = 0;
     this.lastStyle = null;    // 마지막 플레이 스타일 진단 (H.style.diagnose 결과 + 시각)
     this.daily = [];          // 오늘의 10문제 기록 [{date, asked, correct, lossBb}] 최근 순
+    this.acc = {};            // 자리별 최근 결과 창 (1 = 좋음·무난, 0 = 실수) 최대 ACC_WINDOW
+    this.accPos = {};         // 자리별 최근 포지션 목록 (드릴 카드 라벨용)
+    this.drillLog = [];       // 날짜별 드릴·오늘의 10문제 결과 [{date, asked, correct}]
     if (data && data.version === VERSION) {
       this.cats = data.cats || {};
       this.pos = data.pos || {};
@@ -54,9 +57,14 @@
       this.updated = data.updated || 0;
       this.lastStyle = data.lastStyle || null;
       this.daily = data.daily || [];
+      this.acc = data.acc || {};
+      this.accPos = data.accPos || {};
+      this.drillLog = data.drillLog || [];
     }
   }
   const DAILY_LIMIT = 14;
+  const ACC_WINDOW = 20;
+  const LOG_LIMIT = 60;
 
   Profile.prototype.bucket = function (map, key) {
     if (!map[key]) map[key] = emptyBucket();
@@ -83,6 +91,15 @@
         const p = self.bucket(self.pos, it.position);
         p.n++; p.loss += it.evLossBb; if (isMistake(it)) p.mistakes++;
       }
+      /* 최근 창: 드릴 카드의 "최근 20회 정확도" */
+      const w = self.acc[key] || (self.acc[key] = []);
+      w.push(isMistake(it) ? 0 : 1);
+      if (w.length > ACC_WINDOW) w.shift();
+      if (it.position) {
+        const wp = self.accPos[key] || (self.accPos[key] = []);
+        wp.push(it.position);
+        if (wp.length > ACC_WINDOW) wp.shift();
+      }
       self.decisions++;
       self.loss += it.evLossBb;
       if (isMistake(it)) {
@@ -99,10 +116,93 @@
   };
 
   /** 드릴 정답은 실전 통계와 따로 센다 — 드릴을 많이 한 자리가 약점처럼 보이면 안 된다 */
-  Profile.prototype.addDrill = function (key, evLossBb) {
+  Profile.prototype.addDrill = function (key, evLossBb, opts) {
     const c = this.bucket(this.cats, key);
     c.drillN++; c.drillLoss += evLossBb;
+    this.logDrill((opts && opts.date) || todayKey(), evLossBb < 0.6 ? 1 : 0);
     this.updated = Date.now();
+  };
+  function todayKey() {
+    const d = new Date(), m = d.getMonth() + 1, day = d.getDate();
+    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+  /** 날짜별 드릴 정답 집계 (오늘의 10문제 포함) */
+  Profile.prototype.logDrill = function (date, correct) {
+    let rec = this.drillLog.filter(function (d) { return d.date === date; })[0];
+    if (!rec) { rec = { date: date, asked: 0, correct: 0 }; this.drillLog.push(rec); }
+    rec.asked++; rec.correct += correct ? 1 : 0;
+    this.drillLog.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    if (this.drillLog.length > LOG_LIMIT) this.drillLog.splice(0, this.drillLog.length - LOG_LIMIT);
+  };
+
+  /** 최근 7일(오늘 포함) 드릴 정확도와 그 전 7일 — 개선 추이 */
+  Profile.prototype.weekAccuracy = function (today) {
+    const t = today ? new Date(today + 'T00:00:00') : new Date();
+    const dayMs = 86400000;
+    const inRange = function (d, from, to) { const x = new Date(d.date + 'T00:00:00').getTime(); return x >= from && x <= to; };
+    const end = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
+    const sum = function (from, to) {
+      let a = 0, c = 0;
+      this.drillLog.forEach(function (d) { if (inRange(d, from, to)) { a += d.asked; c += d.correct; } });
+      return { asked: a, correct: c, pct: a ? c / a : null };
+    }.bind(this);
+    return { now: sum(end - 6 * dayMs, end), before: sum(end - 13 * dayMs, end - 7 * dayMs) };
+  };
+
+  /** 연속 학습일: 오늘(또는 어제)부터 거슬러 드릴 기록이 있는 날 수 */
+  Profile.prototype.streak = function (today) {
+    const dates = {};
+    this.drillLog.forEach(function (d) { if (d.asked > 0) dates[d.date] = true; });
+    this.daily.forEach(function (d) { dates[d.date] = true; });
+    const t = today ? new Date(today + 'T00:00:00') : new Date();
+    let cur = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+    const key = function (d) { const m = d.getMonth() + 1, day = d.getDate(); return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day; };
+    if (!dates[key(cur)]) cur = new Date(cur.getTime() - 86400000);   // 오늘 아직 안 했으면 어제까지의 연속
+    let n = 0;
+    while (dates[key(cur)]) { n++; cur = new Date(cur.getTime() - 86400000); }
+    return n;
+  };
+
+  /** 스트리트별 정확도 (실전 결정 기준) */
+  Profile.prototype.byStreetAccuracy = function () {
+    const self = this;
+    return STREETS.map(function (st) {
+      let n = 0, m = 0;
+      Object.keys(self.cats).forEach(function (k) {
+        if (k.indexOf(st + '/') !== 0) return;
+        n += self.cats[k].n; m += self.cats[k].mistakes;
+      });
+      return { street: st, n: n, acc: n ? (n - m) / n : null };
+    });
+  };
+
+  /** 반복되는 실수 Top N (최근 실수 목록을 자리별로 센다) */
+  Profile.prototype.repeatMistakes = function (limit) {
+    const count = {};
+    this.recent.forEach(function (m) { count[m.key] = (count[m.key] || 0) + 1; });
+    return Object.keys(count).map(function (k) { return { key: k, n: count[k] }; })
+      .sort(function (a, b) { return b.n - a.n; }).slice(0, limit || 3);
+  };
+
+  /*
+   * 개인화 드릴 카드: 가장 약한 자리, 그 자리에서 가장 잦은 포지션, 최근 창의 정확도, 목표 문구 키.
+   * 약점이 없으면 null (홈은 무작위 드릴을 권한다)
+   */
+  Profile.prototype.drillCard = function () {
+    const key = this.drillTarget();
+    if (!key) return null;
+    const w = this.acc[key] || [];
+    const correct = w.reduce(function (a, b) { return a + b; }, 0);
+    const posList = this.accPos[key] || [];
+    const posCount = {};
+    posList.forEach(function (p) { posCount[p] = (posCount[p] || 0) + 1; });
+    const pos = Object.keys(posCount).sort(function (a, b) { return posCount[b] - posCount[a]; })[0] || null;
+    const row = this.table().filter(function (r) { return r.key === key; })[0];
+    return {
+      key: key, pos: pos, n: w.length, accuracy: w.length ? correct / w.length : null,
+      avg: row ? row.avg : 0, bb100: row ? row.bb100 : 0,
+      goal: 'drill.goal.' + key.split('/')[1]
+    };
   };
 
   function row(key, b, hands) {
@@ -181,7 +281,8 @@
       version: this.version, cats: this.cats, pos: this.pos,
       decisions: this.decisions, loss: this.loss, hands: this.hands,
       recent: this.recent, updated: this.updated,
-      lastStyle: this.lastStyle, daily: this.daily
+      lastStyle: this.lastStyle, daily: this.daily,
+      acc: this.acc, accPos: this.accPos, drillLog: this.drillLog
     };
   };
 
