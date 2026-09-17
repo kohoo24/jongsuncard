@@ -117,13 +117,36 @@
     return item;
   }
 
+  /*
+   * 오늘의 10문제: 날짜(YYYY-MM-DD, 현지 시각)로 시드를 고정한다. 같은 날에는 누가 풀어도 같은
+   * 10문제가 나온다 — i 번째 문제의 시드는 dailySeed(date) + i.
+   */
+  const DAILY_COUNT = 10;
+  function dateKey(d) {
+    d = d || new Date();
+    const m = d.getMonth() + 1, day = d.getDate();
+    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+  function dailySeed(date) {
+    let h = 2166136261;
+    const str = 'daily:' + (date || dateKey());
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    return (h % 2000000000) + 1;
+  }
+
   /** 드릴 세션 집계 */
-  function Session(target) {
+  function Session(target, opts) {
     this.target = target || null;
     this.asked = 0;
     this.counts = { good: 0, ok: 0, mistake: 0, blunder: 0 };
     this.lossBb = 0;
+    this.daily = !!(opts && opts.daily);
+    this.date = opts && opts.date ? opts.date : (this.daily ? dateKey() : null);
+    this.limit = this.daily ? DAILY_COUNT : 0;
   }
+  Session.prototype.finished = function () { return this.limit > 0 && this.asked >= this.limit; };
+  /** 다음 문제의 시드 (데일리는 고정, 아니면 null = 무작위) */
+  Session.prototype.nextSeed = function () { return this.daily ? dailySeed(this.date) + this.asked : null; };
   Session.prototype.record = function (item) {
     this.asked++;
     this.counts[item.verdict] = (this.counts[item.verdict] || 0) + 1;
@@ -134,6 +157,9 @@
   H.drill = {
     HERO_ID: HERO_ID,
     BB: BB,
+    DAILY_COUNT: DAILY_COUNT,
+    dateKey: dateKey,
+    dailySeed: dailySeed,
     generate: generate,
     grade: grade,
     parseTarget: parseTarget,

@@ -527,6 +527,90 @@ async function playHands(page, target, opts) {
   check('드릴 뒤 실전 게임을 이어간다', resumedAfterDrill.hand === handBeforeDrill && !resumedAfterDrill.drill,
     handBeforeDrill + ' -> ' + JSON.stringify(resumedAfterDrill));
 
+  console.log('\n[코치 · 스타일 진단 · 오늘의 10문제]');
+  await restartIfOver(page, 'E2E003');
+  await waitHeroTurn(page, 'E2E003');
+  const coach0 = await page.evaluate(function () {
+    return {
+      btn: !document.getElementById('btnCoach').disabled,
+      box: document.getElementById('coachBox').classList.contains('hidden')
+    };
+  });
+  check('히어로 차례에 "생각 정리" 버튼이 보이고 상자는 닫혀 있다', coach0.btn && coach0.box, JSON.stringify(coach0));
+  await page.click('#btnCoach');
+  await page.waitForTimeout(400);
+  const coach1 = await page.evaluate(function () {
+    const box = document.getElementById('coachBox');
+    return {
+      open: !box.classList.contains('hidden'),
+      why: box.querySelectorAll('.why-line').length,
+      cands: box.querySelectorAll('.drill-cand').length,
+      best: box.querySelectorAll('.coach-best').length,
+      untranslated: /why\.|coach\./.test(box.textContent),
+      used: window.HoldemUI.coachUsed
+    };
+  });
+  check('생각 정리 상자에 이유 한 줄 · 탄탄한 선택 · 후보 EV 가 뜬다', coach1.open && coach1.why === 1 && coach1.cands >= 2 && coach1.best === 1, JSON.stringify(coach1));
+  check('코치 문구가 전부 번역된다', !coach1.untranslated);
+  await page.click('#btnCoachClose');
+  await page.waitForTimeout(150);
+  const coach2 = await page.evaluate(function () {
+    return { box: document.getElementById('coachBox').classList.contains('hidden'), btn: !document.getElementById('btnCoach').disabled };
+  });
+  check('닫으면 상자가 사라지고 버튼이 돌아온다', coach2.box && coach2.btn, JSON.stringify(coach2));
+  await page.click('#btnCall');
+  await page.waitForTimeout(300);
+  const coached = await page.evaluate(function () {
+    const items = window.HoldemUI.reviewItems || [];
+    return items.length ? items[items.length - 1].coached : null;
+  });
+  check('코치를 본 결정에는 coached 표시가 붙는다', coached === true, String(coached));
+
+  await safeClick(page, '.tab[data-tab="learn"]');
+  await page.waitForTimeout(200);
+  const learn2 = await page.evaluate(function () {
+    const body = document.getElementById('tabBody');
+    return {
+      style: !!body.querySelector('.style-card'),
+      daily: !!document.getElementById('btnDaily'),
+      untranslated: /style\.|daily\./.test(body.textContent)
+    };
+  });
+  check('학습 탭에 스타일 진단 카드와 오늘의 10문제가 있다', learn2.style && learn2.daily && !learn2.untranslated, JSON.stringify(learn2));
+  await page.click('#btnDaily');
+  await page.waitForTimeout(500);
+  const daily1 = await page.evaluate(function () {
+    const d = window.HoldemUI.drill;
+    return { active: !!d, daily: d && d.session.daily, limit: d && d.session.limit, heroTurn: window.HoldemUI.game.currentActor().isHuman,
+      meta: document.getElementById('topMeta').textContent };
+  });
+  check('오늘의 10문제가 드릴로 시작된다 (10문제 · 날짜 시드)', daily1.active && daily1.daily && daily1.limit === 10 && daily1.heroTurn, JSON.stringify(daily1));
+  const firstHand = await page.evaluate(function () { return window.HoldemUI.game.byId(0).cards.map(function (c) { return c.rank + c.suit; }).join(''); });
+  await page.click('#btnCall');
+  await page.waitForTimeout(300);
+  await page.click('#btnDrillQuit');
+  await page.waitForTimeout(400);
+  const daily2 = await page.evaluate(function () {
+    const p = window.HoldemUI.profile;
+    const today = window.Holdem.drill.dateKey();
+    return { rec: p.dailyFor(today), modal: (document.querySelector('.modal.show') || {}).id, toast: !document.getElementById('toast').classList.contains('hidden') };
+  });
+  check('도중에 끝내도 오늘 기록이 남는다', daily2.rec && daily2.rec.asked === 1 && daily2.modal === 'setupModal', JSON.stringify(daily2));
+  check('결과 토스트가 뜬다', daily2.toast);
+  /* 같은 날 다시 시작하면 같은 첫 문제 */
+  await page.click('#btnResume');
+  await page.waitForTimeout(400);
+  await safeClick(page, '.tab[data-tab="learn"]');
+  await page.waitForTimeout(200);
+  await page.click('#btnDaily');
+  await page.waitForTimeout(500);
+  const secondHand = await page.evaluate(function () { return window.HoldemUI.game.byId(0).cards.map(function (c) { return c.rank + c.suit; }).join(''); });
+  check('오늘의 10문제는 다시 시작해도 같은 문제가 나온다', firstHand === secondHand, firstHand + ' vs ' + secondHand);
+  await page.click('#btnDrillQuit');
+  await page.waitForTimeout(300);
+  await page.click('#btnResume');
+  await page.waitForTimeout(400);
+
   console.log('\n[저장과 복원]');
   await waitHeroTurn(page, 'E2E004');   // 봇이 움직이는 도중에 찍으면 새로고침 사이에 보드가 바뀐다
   const before = await page.evaluate(function () {

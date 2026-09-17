@@ -42,6 +42,8 @@
     this.hands = 0;
     this.recent = [];
     this.updated = 0;
+    this.lastStyle = null;    // 마지막 플레이 스타일 진단 (H.style.diagnose 결과 + 시각)
+    this.daily = [];          // 오늘의 10문제 기록 [{date, asked, correct, lossBb}] 최근 순
     if (data && data.version === VERSION) {
       this.cats = data.cats || {};
       this.pos = data.pos || {};
@@ -50,8 +52,11 @@
       this.hands = data.hands || 0;
       this.recent = data.recent || [];
       this.updated = data.updated || 0;
+      this.lastStyle = data.lastStyle || null;
+      this.daily = data.daily || [];
     }
   }
+  const DAILY_LIMIT = 14;
 
   Profile.prototype.bucket = function (map, key) {
     if (!map[key]) map[key] = emptyBucket();
@@ -70,6 +75,7 @@
     this.hands++;
     items.forEach(function (it) {
       if (!it || it.evLossBb == null || !it.spot) return;
+      if (it.coached) return;   // 코치를 보고 한 결정은 실력이 아니다
       const key = it.street + '/' + it.spot;
       const c = self.bucket(self.cats, key);
       c.n++; c.loss += it.evLossBb; if (isMistake(it)) c.mistakes++;
@@ -149,11 +155,32 @@
     return this.weakest().filter(function (r) { return r.n >= MIN_SAMPLE && r.avg >= WEAK_MIN_AVG; });
   };
 
+  /** 스타일 진단을 저장한다 (세션이 끝나도 학습 탭에 남게) */
+  Profile.prototype.setStyle = function (diag) {
+    if (!diag) return;
+    this.lastStyle = Object.assign({}, diag, { t: Date.now() });
+    this.updated = Date.now();
+  };
+
+  /** 오늘의 10문제 결과. 같은 날짜는 덮어쓴다 */
+  Profile.prototype.setDaily = function (rec) {
+    if (!rec || !rec.date) return;
+    this.daily = this.daily.filter(function (d) { return d.date !== rec.date; });
+    this.daily.unshift({ date: rec.date, asked: rec.asked, correct: rec.correct, lossBb: rec.lossBb });
+    this.daily.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });   // 최근 날짜부터
+    if (this.daily.length > DAILY_LIMIT) this.daily.length = DAILY_LIMIT;
+    this.updated = Date.now();
+  };
+  Profile.prototype.dailyFor = function (date) {
+    return this.daily.filter(function (d) { return d.date === date; })[0] || null;
+  };
+
   Profile.prototype.toJSON = function () {
     return {
       version: this.version, cats: this.cats, pos: this.pos,
       decisions: this.decisions, loss: this.loss, hands: this.hands,
-      recent: this.recent, updated: this.updated
+      recent: this.recent, updated: this.updated,
+      lastStyle: this.lastStyle, daily: this.daily
     };
   };
 

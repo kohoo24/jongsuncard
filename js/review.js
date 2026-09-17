@@ -124,10 +124,11 @@
       topPct: o.topPct,
       draws: draws,
       chosen: { type: chosen.type, amount: chosen.amount, ev: chosen.ev },
-      best: { type: best.type, amount: best.amount, ev: best.ev, tag: best.tag },
+      best: { type: best.type, amount: best.amount, ev: best.ev, tag: best.tag, fe: best.fe },
       candidates: o.candidates.map(function (c) {
         return { type: c.type, amount: c.amount, ev: c.ev, tag: c.tag, fe: c.fe };
       }),
+      opponents: o.context.opponents ? o.context.opponents.length : null,
       evLoss: evLoss,
       evLossBb: evLoss / bb,
       verdict: verdict.verdict,
@@ -166,6 +167,85 @@
     return T('review.thinBet', { eq: eqPct });
   }
 
+  /*
+   * "왜 그런가" 한 줄 — 숫자 뒤의 개념. 리뷰·드릴·코치가 같이 쓴다.
+   * 결정 하나에 개념 하나만 고른다 (포지션 · 레인지 우위 · 팟 오즈 · 임플라이드 오즈 · 폴드 에쿼티 ·
+   * 팟 컨트롤 · 멀티웨이 · 3벳 도미네이션). 우선순위는 그 자리에서 가장 결정을 좌우한 요인 순이다.
+   */
+  const EARLY = { UTG: 1, UTG1: 1, MP: 1, LJ: 1 };
+  const LATE = { CO: 1, BTN: 1 };
+  function reason(item) {
+    const best = item.best || {};
+    const pos = item.position;
+    const posName = pos ? T('pos.' + pos) : '';
+    const eqPct = Math.round((item.equity || 0) * 100);
+    const needPct = Math.round((item.potOdds || 0) * 100);
+    const multiway = (item.opponents || 0) >= 2;
+
+    if (item.street === 'preflop') {
+      if (item.raisesBefore >= 3) {
+        return best.type === 'fold' ? T('why.vs3betFold') : best.type === 'call' ? T('why.vs3betCall') : T('why.fourBet');
+      }
+      if (item.raisesBefore === 2) {
+        if (best.type === 'raise') return T('why.threeBet');
+        if (best.type === 'call') return pos === 'BB' ? T('why.bbDefend') : T('why.coldCall');
+        return T('why.vsOpenFold');
+      }
+      if (best.type === 'raise') {
+        if (EARLY[pos]) return T('why.openEarly', { pos: posName });
+        if (LATE[pos]) return T('why.openLate', { pos: posName });
+        if (pos === 'SB') return T('why.openSb');
+        return T('why.openMid', { pos: posName });
+      }
+      if (best.type === 'fold') return EARLY[pos] ? T('why.openEarly', { pos: posName }) : T('why.foldPre');
+      return T('why.limp');
+    }
+
+    /* 포스트플랍 */
+    const draw = item.draws && item.draws.outs > 0 ? item.draws : null;
+    if (item.toCall > 0) {
+      if (best.type === 'raise') return best.tag === 'bluff' ? T('why.raiseBluff', { fe: Math.round((best.fe || 0) * 100) }) : T('why.raiseValue');
+      if (best.type === 'call') {
+        if (draw && item.equity < item.potOdds + 0.05) return T('why.impliedOdds', { outs: draw.outs, pct: Math.round(draw.byRiver * 100) });
+        return multiway ? T('why.callMultiway', { eq: eqPct, need: needPct }) : T('why.potOdds', { eq: eqPct, need: needPct });
+      }
+      if (draw) return T('why.foldDraw', { outs: draw.outs, eq: eqPct, need: needPct });
+      return multiway ? T('why.foldMultiway', { eq: eqPct, need: needPct }) : T('why.foldOdds', { eq: eqPct, need: needPct });
+    }
+    if (best.type === 'raise') {
+      if (best.tag === 'bluff') return draw ? T('why.semiBluff', { outs: draw.outs, fe: Math.round((best.fe || 0) * 100) }) : T('why.bluff', { fe: Math.round((best.fe || 0) * 100) });
+      return item.spot === 'cbet' ? T('why.cbet', { eq: eqPct }) : T('why.valueBet', { eq: eqPct });
+    }
+    /* 체크 */
+    if (item.spot === 'cbet') return T('why.checkBack', { eq: eqPct });
+    if (item.equity >= 0.7) return T('why.trap');
+    return draw ? T('why.checkDraw', { outs: draw.outs }) : T('why.potControl', { eq: eqPct });
+  }
+
+  /*
+   * 코치: 액션을 하기 전에 "이 자리의 생각 정리"를 만든다. 기록하지 않는다.
+   * evaluate 와 같은 계산이지만 기준선(탄탄한 플레이어의 선택)을 정답으로 두고 그 이유를 붙인다.
+   */
+  function preview(game, player, opts) {
+    const o = H.ai.analyze(game, player, {
+      difficulty: (opts && opts.difficulty) || 'hard',
+      tracker: (opts && opts.tracker) || null
+    });
+    if (!o) return null;
+    const baseline = H.ai.decide(game, player, {
+      difficulty: (opts && opts.difficulty) || 'hard',
+      tracker: (opts && opts.tracker) || null,
+      profile: H.ai.PROFILES[1],
+      rng: function () { return 0.5; }
+    });
+    const item = evaluate(game, player, baseline, opts);
+    if (!item) return null;
+    item.spotInfo = spotOf(game, player);
+    item.reason = reason(item);
+    item.explanation = explain(item);
+    return item;
+  }
+
   /** 핸드 전체 요약 */
   function summarize(items, bigBlind) {
     if (!items || !items.length) {
@@ -191,6 +271,8 @@
   H.review = {
     evaluate: evaluate,
     explain: explain,
+    reason: reason,
+    preview: preview,
     classify: classify,
     summarize: summarize,
     actionLabel: actionLabel,

@@ -64,6 +64,7 @@
     tab: 'log', chartState: { position: 'BTN', playerCount: 6, heroKey: null, userPicked: false },
     sound: true, winningCards: [], busy: false,
     profile: null, drill: null,
+    coach: null, coachUsed: false, coachSig: '',   // 플레이 도중 "생각 정리" (결정 하나에 한 번)
     raiseTo: 0     // 레이즈 목표 금액 — 슬라이더는 step 에 맞춰 값을 깎으므로 정확한 값은 따로 든다
   };
   global.HoldemUI = state;
@@ -725,7 +726,11 @@
     }
     if (state.drill) {
       const d = state.drill;
-      item(labeled(T('drill.title'), d.target ? H.panels.spotLabel(d.target) : T('drill.targetAny')));
+      if (d.session.daily) {
+        item(labeled(T('daily.title'), T('daily.progress', { i: Math.min(d.session.asked + (d.item ? 0 : 1), d.session.limit), n: d.session.limit })));
+      } else {
+        item(labeled(T('drill.title'), d.target ? H.panels.spotLabel(d.target) : T('drill.targetAny')));
+      }
       item(T('drill.progress', { correct: d.session.correct(), asked: d.session.asked }));
       item(labeled(T('top.blinds'), g.smallBlind + '/' + g.bigBlind), true);
       $('topMeta').innerHTML = parts.join('');
@@ -785,6 +790,7 @@
     /* 드릴 문제 중에는 승률·아웃이 곧 답이다 — 답한 뒤에만 보여준다 */
     const quiz = state.drill && !state.drill.item;
     if (quiz) return;
+    updateCoachButton();
     if (state.settings.showEquity && state.heroInfo && g.phase !== 'hand-over' && g.phase !== 'show-choice') {
       host.appendChild(chip('equity', T('ctl.equity', { pct: Math.round(state.heroInfo.equity * 100) })));
       if (state.heroInfo.potOdds > 0) {
@@ -852,6 +858,8 @@
     hide($('btnRow'), !isHeroTurn);
     hide($('raiseRow'), !isHeroTurn);
     hide($('showRow'), !showChoice);
+    refreshCoachSig();
+    hide($('coachBox'), !isHeroTurn || !state.coach);
     const canAddon = handOver && hero && g.canAddon(hero);
     hide($('addonRow'), !canAddon);
     if (canAddon) $('btnAddon').textContent = T('tour.addon', { amount: num(g.addonChips) });
@@ -1265,6 +1273,11 @@
       state.profile.addHand(state.reviewItems);
       H.profile.save(state.profile);
     }
+    /* 플레이 스타일 진단 — 세션 통계가 충분해지면 매 핸드 갱신해 저장한다 */
+    if (state.profile && H.style) {
+      const diag = H.style.diagnose(state.tracker.get(HERO_ID), g.players.length);
+      if (diag) { state.profile.setStyle(diag); H.profile.save(state.profile); }
+    }
     if (state.settings.autoReview && state.reviewItems.length
       && state.lastSummary.total > g.bigBlind * 0.6) {
       // 다음 핸드가 이미 시작됐다면 띄우지 않는다 (클릭을 가로채는 문제)
@@ -1287,7 +1300,7 @@
       const item = H.review.evaluate(g, hero, action, {
         difficulty: 'hard', tracker: state.tracker
       });
-      if (item) state.reviewItems.push(item);
+      if (item) { item.coached = !!state.coachUsed; state.reviewItems.push(item); }
     } catch (e) { /* 리뷰 실패가 게임을 막지는 않는다 */ }
 
     playActionSound(action, hero);
@@ -1324,31 +1337,50 @@
   }
 
   /* ==================== 드릴 ==================== */
-  function startDrill(target) {
+  function startDrill(target, opts) {
+    opts = opts || {};
     clearTimer(); stopClockTick();
     if (state.game && !state.drill) saveSession();   // 진행 중이던 실전은 이어하기로 남긴다
     closeModal('setupModal');
     state.drill = {
       target: target || null,
-      session: new H.drill.Session(target || null),
+      session: new H.drill.Session(target || null, { daily: !!opts.daily }),
       tracker: H.stats.create({ bigBlind: H.drill.BB }),
       current: null, item: null
     };
     nextDrillSpot();
   }
+  /* 오늘의 10문제: 날짜로 시드가 고정된 무작위 자리 10개. 6인 테이블로 고정해 누구나 같은 문제 */
+  function startDaily() { startDrill(null, { daily: true }); }
+
+  function finishDaily() {
+    const d = state.drill;
+    if (!d || !d.session.daily) return;
+    const sess = d.session;
+    if (state.profile) {
+      state.profile.setDaily({ date: sess.date, asked: sess.asked, correct: sess.correct(), lossBb: sess.lossBb });
+      H.profile.save(state.profile);
+    }
+    const msg = T('daily.finished', { correct: sess.correct(), asked: sess.asked, bb: sess.lossBb.toFixed(1) });
+    quitDrill();
+    switchTab('learn');
+    toast(msg);
+  }
 
   function nextDrillSpot() {
     const d = state.drill;
     if (!d) return;
+    if (d.session.finished()) { finishDaily(); return; }
     let r = null;
     try {
       r = H.drill.generate({
         target: d.target, tracker: d.tracker, heroName: T('common.you'),
-        players: Math.max(2, Math.min(9, (state.settings.bots || 5) + 1))
+        seed: d.session.nextSeed(),
+        players: d.session.daily ? 6 : Math.max(2, Math.min(9, (state.settings.bots || 5) + 1))
       });
     }
     catch (e) { r = null; }
-    if (!r) { quitDrill(); return; }
+    if (!r) { if (d.session.daily && d.session.asked) finishDaily(); else quitDrill(); return; }
     d.current = r;
     d.item = null;
     state.game = r.game;
@@ -1393,10 +1425,54 @@
     render();
   }
 
+  /* 코치: 히어로 차례마다 새 결정 — 서명이 바뀌면 이전 생각 정리는 닫는다 */
+  function heroTurnNow() {
+    const g = state.game;
+    return !!g && !state.drill && g.phase === 'awaiting-action' && g.currentActor() === g.byId(HERO_ID);
+  }
+  function refreshCoachSig() {
+    const g = state.game;
+    const sig = heroTurnNow() ? g.handNo + ':' + g.street + ':' + g.actionsOf(HERO_ID).length : '';
+    if (sig !== state.coachSig) { state.coachSig = sig; state.coach = null; state.coachUsed = false; }
+  }
+  /* 코치 버튼은 상단 바에 — 컨트롤에 줄을 더하면 작은 폰에서 펠트가 줄어든다. 히어로 차례에만 켜진다 */
+  function updateCoachButton() {
+    const b = $('btnCoach');
+    if (!b) return;
+    refreshCoachSig();
+    b.disabled = !heroTurnNow();
+    b.setAttribute('aria-pressed', String(!!state.coach));
+    b.title = T('coach.btn');
+  }
+  /* 코치 버튼: 이 자리의 생각 정리를 보여준다. 본 뒤의 결정은 프로파일에 넣지 않는다 */
+  function openCoach() {
+    if (state.coach) { closeCoach(); return; }
+    const g = state.game;
+    if (!g || state.drill) return;
+    const hero = g.byId(HERO_ID);
+    if (!hero || g.phase !== 'awaiting-action' || g.currentActor() !== hero) return;
+    let item = null;
+    try { item = H.review.preview(g, hero, { difficulty: 'hard', tracker: state.tracker }); }
+    catch (e) { item = null; }
+    if (!item) return;
+    state.coach = item;
+    state.coachUsed = true;
+    H.panels.renderCoach(item, $('coachBox'), { onClose: closeCoach });
+    hide($('coachBox'), false);
+    updateCoachButton();
+  }
+  function closeCoach() {
+    state.coach = null;            // 닫아도 coachUsed 는 남는다 — 이미 봤다
+    hide($('coachBox'), true);
+    updateCoachButton();
+  }
+
   function updateDrillControls() {
     const g = state.game, d = state.drill;
     const hero = g.byId(HERO_ID);
     const answered = !!d.item;
+    hide($('coachBox'), true);
+    updateCoachButton();
     const isHeroTurn = !answered && g.phase === 'awaiting-action' && g.currentActor() === hero;
     hide($('btnRow'), !isHeroTurn);
     hide($('raiseRow'), !isHeroTurn);
@@ -1426,6 +1502,7 @@
       setupActionButtons(g, hero);
     } else if (answered) {
       H.panels.renderDrillFeedback(d.item, d.session, $('drillFeedback'));
+      $('btnDrillNext').querySelector('span').textContent = d.session.finished() ? T('daily.finish') : T('drill.next');
       $('btnDrillNext').focus();
     }
   }
@@ -1449,6 +1526,16 @@
     openModal('setupModal');
   }
 
+  let toastTimer = null;
+  function toast(msg) {
+    const t = $('toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.remove('hidden');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.classList.add('hidden'); }, 5000);
+  }
+
   function resetProfile() {
     if (!global.confirm(T('learn.resetConfirm'))) return;
     state.profile = H.profile.reset();
@@ -1470,7 +1557,12 @@
     const host = $('tabBody');
     if ($('sidePanel').classList.contains('hidden')) return;
     if (state.tab === 'learn') {
-      H.panels.renderLearn(state.profile, host, { onDrill: startDrill, onReset: resetProfile });
+      const heroStats = state.game && !state.drill && state.tracker ? state.tracker.get(HERO_ID) : null;
+      const diag = heroStats && H.style ? H.style.diagnose(heroStats, state.game.players.length) : null;
+      H.panels.renderLearn(state.profile, host, {
+        onDrill: startDrill, onReset: resetProfile, onDaily: startDaily,
+        style: diag, styleHands: heroStats ? heroStats.hands : 0
+      });
       return;
     }
     if (!state.game) return;
@@ -1850,8 +1942,9 @@
       render();
     });
     $('btnReview').addEventListener('click', openReview);
+    $('btnCoach').addEventListener('click', openCoach);
     $('btnDrillNext').addEventListener('click', nextDrillSpot);
-    $('btnDrillQuit').addEventListener('click', quitDrill);
+    $('btnDrillQuit').addEventListener('click', function () { if (state.drill && state.drill.session.daily && state.drill.session.asked) finishDaily(); else quitDrill(); });
     $('btnDrillFromSetup').addEventListener('click', function () {
       startDrill(state.profile ? state.profile.drillTarget() : null);
     });

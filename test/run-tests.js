@@ -1921,5 +1921,102 @@ test('애드온 상태가 저장/복원된다', function () {
   eq(g2.canAddon(g2.players[0]), false, '이미 받았다는 사실이 유지되어야 한다');
 });
 
+/* ==================== "왜" 한 줄 · 코치 · 스타일 진단 · 오늘의 10문제 ==================== */
+require('../js/style.js');
+test('리뷰 항목마다 "왜" 한 줄이 나온다 (프리플랍 · 포스트플랍)', function () {
+  const g = makeGame(6);
+  g.startHand();
+  const hero = g.currentActor();
+  const pre = H.review.evaluate(g, hero, { type: 'fold' }, { difficulty: 'hard' });
+  const why = H.review.reason(pre);
+  assert(typeof why === 'string' && why.length > 10, why);
+  assert(why.indexOf('why.') < 0, '번역되지 않은 키: ' + why);
+  /* 플랍까지 진행해 포스트플랍 자리도 본다 */
+  let guard = 0;
+  while (g.phase === 'awaiting-action' && g.street === 'preflop' && guard++ < 20) {
+    const p = g.currentActor(); g.act(p.id, { type: g.actionsFor(p).canCheck ? 'check' : 'call' });
+  }
+  if (g.phase === 'need-street') g.dealNextStreet();
+  if (g.phase === 'awaiting-action') {
+    const p = g.currentActor();
+    const post = H.review.evaluate(g, p, { type: g.actionsFor(p).canCheck ? 'check' : 'call' }, { difficulty: 'hard' });
+    const why2 = H.review.reason(post);
+    assert(typeof why2 === 'string' && why2.indexOf('why.') < 0, why2);
+    assert(post.opponents >= 1, '상대 수가 기록된다');
+  }
+});
+test('코치 미리보기는 기록 없이 이유·후보·탄탄한 선택을 준다', function () {
+  const g = makeGame(4);
+  g.startHand();
+  const hero = g.currentActor();
+  const c = H.review.preview(g, hero, { difficulty: 'hard' });
+  assert(c && c.reason && c.candidates.length >= 2, JSON.stringify(c && c.best));
+  eq(c.evLoss, 0, '기준선을 정답으로 두므로 손실 0');
+  assert(c.spotInfo && c.spotInfo.key.indexOf('preflop/') === 0);
+  eq(g.phase, 'awaiting-action', '게임 상태를 바꾸지 않는다');
+});
+test('코치를 본 결정은 약점 프로파일에 들어가지 않는다', function () {
+  const p = H.profile.create();
+  const item = { street: 'flop', spot: 'vsBet', position: 'BB', evLossBb: 2, verdict: 'mistake', cards: [], board: [], chosen: {}, best: {} };
+  p.addHand([Object.assign({}, item, { coached: true })]);
+  eq(p.decisions, 0);
+  p.addHand([item]);
+  eq(p.decisions, 1);
+});
+test('플레이 스타일 진단: 루즈-패시브는 물고기, 타이트-어그레시브는 상어', function () {
+  const base = { hands: 60, threeBet: 0.07, wtsd: 0.28, samples: { facedBet: 20, showdown: 8, threeBetOpp: 20 } };
+  const fish = H.style.diagnose(Object.assign({}, base, { vpip: 0.55, pfr: 0.08, af: 0.6, foldToBet: 0.2 }), 6);
+  eq(fish.type, 'fish');
+  assert(fish.score < 50, '물고기 점수 ' + fish.score);
+  assert(fish.tips.length >= 2 && fish.tips[0].indexOf('style.tip.') === 0, fish.tips.join(','));
+  const shark = H.style.diagnose(Object.assign({}, base, { vpip: 0.24, pfr: 0.19, af: 2.6, foldToBet: 0.45 }), 6);
+  eq(shark.type, 'tag');
+  assert(shark.score >= 90, '상어 점수 ' + shark.score);
+  eq(shark.tips.length, 0);
+  const lag = H.style.diagnose(Object.assign({}, base, { vpip: 0.40, pfr: 0.32, af: 3.8, foldToBet: 0.45 }), 6);
+  eq(lag.type, 'lag');
+  const rock = H.style.diagnose(Object.assign({}, base, { vpip: 0.10, pfr: 0.04, af: 1.0, foldToBet: 0.7 }), 6);
+  eq(rock.type, 'rock');
+  eq(H.style.diagnose(Object.assign({}, base, { hands: 5, vpip: 0.3, pfr: 0.2, af: 2 }), 6), null, '표본 부족이면 null');
+  /* 인원수 보정: 9인 20% VPIP 는 정상, 헤즈업 20% 는 너무 타이트 */
+  const nine = H.style.diagnose(Object.assign({}, base, { vpip: 0.20, pfr: 0.15, af: 2.5, foldToBet: 0.45 }), 9);
+  assert(nine.rows[0].status === 'ok', '9인 VPIP 20%: ' + nine.rows[0].status);
+  const hu = H.style.diagnose(Object.assign({}, base, { vpip: 0.20, pfr: 0.15, af: 2.5, foldToBet: 0.45 }), 2);
+  assert(hu.rows[0].status === 'low', '헤즈업 VPIP 20%: ' + hu.rows[0].status);
+  /* 진단 문구가 전부 번역된다 */
+  ['tag', 'lag', 'rock', 'fish'].forEach(function (t) { assert(H.i18n.t('style.type.' + t).indexOf('style.') < 0); });
+  fish.tips.forEach(function (k) { assert(H.i18n.t(k).indexOf('style.tip') < 0, k); });
+});
+test('오늘의 10문제는 날짜로 시드가 고정되고 10문제에서 끝난다', function () {
+  eq(H.drill.dailySeed('2026-09-17'), H.drill.dailySeed('2026-09-17'));
+  assert(H.drill.dailySeed('2026-09-17') !== H.drill.dailySeed('2026-09-18'));
+  const s = new H.drill.Session(null, { daily: true, date: '2026-09-17' });
+  eq(s.limit, 10);
+  eq(s.nextSeed(), H.drill.dailySeed('2026-09-17'));
+  s.record({ verdict: 'good', evLossBb: 0 });
+  eq(s.nextSeed(), H.drill.dailySeed('2026-09-17') + 1);
+  for (let i = 1; i < 10; i++) s.record({ verdict: 'ok', evLossBb: 0.2 });
+  eq(s.finished(), true);
+  const plain = new H.drill.Session(null);
+  eq(plain.nextSeed(), null); eq(plain.finished(), false);
+  /* 같은 시드면 같은 문제 */
+  const a = H.drill.generate({ seed: H.drill.dailySeed('2026-09-17'), players: 6 });
+  const b = H.drill.generate({ seed: H.drill.dailySeed('2026-09-17'), players: 6 });
+  assert(a && b);
+  eq(a.hero.cards.map(H.cards.cardToString).join(''), b.hero.cards.map(H.cards.cardToString).join(''));
+  eq(a.spot.key, b.spot.key);
+  /* 프로파일 기록: 같은 날짜는 덮어쓴다 */
+  const p = H.profile.create();
+  p.setDaily({ date: '2026-09-17', asked: 10, correct: 6, lossBb: 3.2 });
+  p.setDaily({ date: '2026-09-17', asked: 10, correct: 8, lossBb: 1.1 });
+  p.setDaily({ date: '2026-09-16', asked: 10, correct: 5, lossBb: 4 });
+  eq(p.daily.length, 2);
+  eq(p.dailyFor('2026-09-17').correct, 8);
+  const p2 = H.profile.create(JSON.parse(JSON.stringify(p.toJSON())));
+  eq(p2.daily.length, 2, '저장/복원');
+  p2.setStyle({ type: 'tag', icon: '🦈', score: 88, hands: 40, rows: [], tips: [] });
+  eq(H.profile.create(JSON.parse(JSON.stringify(p2.toJSON()))).lastStyle.type, 'tag');
+});
+
 console.log('\n결과: ' + passed + ' 통과, ' + failed + ' 실패\n');
 process.exit(failed ? 1 : 0);

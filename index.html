@@ -20,6 +20,7 @@
     <div class="topbtns">
       <button class="ghost" id="btnUnit" aria-pressed="false" title="금액 단위 전환">bb</button>
       <button class="ghost" id="btnSound" aria-pressed="true" title="소리">&#128266;</button>
+      <button class="ghost coach-btn" id="btnCoach" disabled title="생각 정리" aria-pressed="false">&#128161;<span class="txt" data-i18n="coach.btnShort">생각 정리</span></button>
       <button class="ghost" id="btnPanel" aria-expanded="true" data-i18n="top.log">기록</button>
       <button class="ghost" id="btnMenu" data-i18n="top.newGame">새 게임</button>
     </div>
@@ -58,6 +59,7 @@
 
     <div class="action-area">
       <div class="drill-hint hidden" id="drillHint" aria-live="polite"></div>
+      <div class="coach-box hidden" id="coachBox" aria-live="polite"></div>
       <div class="btn-row" id="btnRow">
         <button class="act danger" id="btnFold"><span></span><kbd>F</kbd></button>
         <button class="act" id="btnCall"><span></span><kbd>C</kbd></button>
@@ -94,6 +96,8 @@
     </div>
   </section>
 </div>
+
+<div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 
 <!-- 설정 -->
 <div class="modal" id="setupModal" role="dialog" aria-modal="true" aria-labelledby="setupTitle">
@@ -185,6 +189,7 @@
 <script src="js/ai.js"></script>
 <script src="js/review.js"></script>
 <script src="js/profile.js"></script>
+<script src="js/style.js"></script>
 <script src="js/drill.js"></script>
 <script src="js/history.js"></script>
 <script src="js/storage.js"></script>

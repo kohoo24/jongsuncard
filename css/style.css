@@ -554,6 +554,74 @@ button.ghost[aria-pressed="false"] { opacity: .45; }
 .rv-best { color: var(--gold); }
 .review-draws { font-size: 11px; color: #9fd4ff; margin-top: 3px; }
 
+/* "왜" 한 줄 · 코치 */
+.why-line { font-size: 11.5px; color: var(--text); margin-top: 5px; line-height: 1.45; }
+.why-line b { color: var(--gold); margin-right: 2px; }
+.rv-coached { color: #9fd4ff; font-size: 10.5px; }
+.topbtns .coach-btn .txt { margin-left: 4px; }
+.topbtns .coach-btn:not(:disabled) { color: var(--gold); border-color: rgba(227, 185, 90, .5); }
+.topbtns .coach-btn[aria-pressed="true"] { background: rgba(227, 185, 90, .18); }
+.topbtns .coach-btn:disabled { opacity: .45; cursor: default; }
+@media (max-width: 520px) { .topbtns .coach-btn .txt { display: none; } }
+.coach-box {
+  background: rgba(0, 0, 0, .35); border: 1px solid rgba(227, 185, 90, .35); border-radius: 10px;
+  padding: 8px 10px; margin-bottom: 8px; font-size: 12px;
+}
+.coach-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.coach-title { font-weight: 700; color: var(--gold); }
+.coach-spot { color: var(--muted); font-size: 11px; }
+.coach-facts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.coach-best { margin-top: 6px; font-weight: 600; }
+.coach-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 10.5px; }
+
+/* 플레이 스타일 진단 */
+.style-card, .daily-card {
+  background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08); border-radius: 10px;
+  padding: 8px 10px 10px; margin-bottom: 12px;
+}
+.style-head { display: flex; align-items: center; gap: 10px; }
+.style-icon { font-size: 28px; line-height: 1; }
+.style-names { flex: 1; min-width: 0; }
+.style-type { font-weight: 700; font-size: 13px; }
+.style-desc { font-size: 11px; color: var(--muted); }
+.style-score { text-align: center; line-height: 1.05; color: var(--gold); }
+.style-score b { display: block; font-size: 22px; }
+.style-score span { font-size: 10px; color: var(--muted); }
+.style-score.good { color: var(--green); }
+.style-score.bad { color: #ff9b8a; }
+.style-meta { font-size: 10.5px; color: var(--muted); margin: 4px 0 8px; }
+.style-rows { display: flex; flex-direction: column; gap: 5px; }
+.style-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; }
+.style-row .sr-name { width: 56px; color: var(--muted); }
+.style-row .sr-val { width: 40px; text-align: right; font-weight: 600; }
+.style-row.s-low .sr-val, .style-row.s-high .sr-val { color: var(--gold); }
+.style-row.s-ok .sr-val { color: var(--green); }
+.style-row.s-na .sr-val { color: var(--muted); font-weight: 400; font-size: 10px; }
+.sr-bar { flex: 1; position: relative; height: 8px; background: rgba(255, 255, 255, .08); border-radius: 4px; }
+.sr-band { position: absolute; top: 0; bottom: 0; background: rgba(90, 200, 140, .35); border-radius: 4px; }
+.sr-dot { position: absolute; top: 50%; width: 10px; height: 10px; margin-left: -5px; transform: translateY(-50%); border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 2px rgba(0, 0, 0, .5); }
+.style-tips-title { font-size: 11px; color: var(--muted); margin-top: 8px; }
+.style-tips { margin: 3px 0 0; padding-left: 16px; font-size: 11.5px; line-height: 1.45; }
+
+/* 토스트 (드릴 결과 등 짧은 알림) */
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: rgba(10, 24, 18, .96); color: var(--text); border: 1px solid rgba(227, 185, 90, .45);
+  border-radius: 999px; padding: 9px 16px; font-size: 13px; z-index: 60; max-width: 92vw;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+.toast.hidden { display: none; }
+
+/* 오늘의 10문제 */
+.daily-status { font-size: 12.5px; margin: 4px 0 8px; }
+.daily-status.done { color: var(--green); }
+.daily-hist-title { font-size: 11px; color: var(--muted); margin-top: 10px; }
+.daily-hist { display: flex; flex-direction: column; gap: 3px; margin-top: 3px; }
+.daily-row { display: flex; gap: 10px; font-size: 11.5px; }
+.daily-row .dr-date { color: var(--muted); width: 44px; }
+.daily-row .dr-score { font-weight: 600; width: 40px; }
+.daily-row .dr-loss { color: #ff9b8a; }
+
 /* 약점 프로파일 */
 .learn-summary { font-size: 12.5px; color: var(--text); margin-bottom: 8px; }
 .learn-note { font-size: 11px; color: var(--muted); margin: 4px 0 8px; }

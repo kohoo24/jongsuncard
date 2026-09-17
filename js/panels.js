@@ -449,6 +449,11 @@
     opts = opts || {};
     const onDrill = opts.onDrill || function () {};
     host.innerHTML = '';
+    /* 스타일 진단 (이번 세션이 있으면 그것, 없으면 저장된 것) · 오늘의 10문제 */
+    if (opts.style) H.panels.renderStyle(opts.style, host, { hands: opts.styleHands || 0 });
+    else if (profile.lastStyle) H.panels.renderStyle(profile.lastStyle, host, { saved: true });
+    else H.panels.renderStyle(null, host, { hands: opts.styleHands || 0 });
+    H.panels.renderDaily(profile, host, { onDaily: opts.onDaily });
     host.appendChild(el('h4', 'panel-sub', T('learn.title')));
 
     const target = profile.drillTarget();
@@ -578,6 +583,7 @@
     }
     host.appendChild(v);
     host.appendChild(el('div', 'drill-explain', item.explanation || H.review.explain(item)));
+    host.appendChild(whyLine(item));
     if (item.best.type !== item.chosen.type || item.best.amount !== item.chosen.amount) {
       host.appendChild(el('div', 'drill-best', T('drill.bestWas', { action: H.review.actionLabel(item.best) })));
     }
@@ -604,6 +610,140 @@
     }
   };
 
+  /* "왜" 한 줄 — 숫자 뒤의 개념 */
+  function whyLine(item) {
+    const w = el('div', 'why-line');
+    w.appendChild(el('b', null, T('why.label')));
+    w.appendChild(document.createTextNode(' ' + (item.reason || H.review.reason(item))));
+    return w;
+  }
+  H.panels.whyLine = whyLine;
+
+  /* ==================== 코치 (플레이 도중 생각 정리) ==================== */
+  H.panels.renderCoach = function (item, host, opts) {
+    opts = opts || {};
+    host.innerHTML = '';
+    const head = el('div', 'coach-head');
+    head.appendChild(el('span', 'coach-title', T('coach.title')));
+    const spot = item.spotInfo || { key: item.street + '/' + item.spot, pos: item.position };
+    head.appendChild(el('span', 'coach-spot', spotLabel(spot.key) + ' · ' + T('pos.' + spot.pos)));
+    host.appendChild(head);
+    const facts = el('div', 'coach-facts');
+    if (item.street === 'preflop' && item.handPct != null) {
+      facts.appendChild(el('span', 'chip', T('coach.hand', { pct: Math.round(item.handPct * 100) })));
+    }
+    facts.appendChild(el('span', 'chip', T('ctl.equity', { pct: Math.round(item.equity * 100) })));
+    if (item.potOdds > 0) facts.appendChild(el('span', 'chip', T('ctl.potOdds', { pct: Math.round(item.potOdds * 100) })));
+    if (item.draws && item.draws.outs > 0) {
+      facts.appendChild(el('span', 'chip', T('ctl.outs', { n: item.draws.outs, name: item.draws.labels[0] || '', pct: Math.round(item.draws.byRiver * 100) })));
+    }
+    host.appendChild(facts);
+    host.appendChild(whyLine(item));
+    host.appendChild(el('div', 'coach-best', T('coach.best', { action: H.review.actionLabel(item.best) })));
+    const cands = el('div', 'drill-cands');
+    item.candidates.slice().sort(function (a, b) { return b.ev - a.ev; }).slice(0, 4).forEach(function (c) {
+      const isBest = c.type === item.best.type && (c.amount || 0) === (item.best.amount || 0);
+      cands.appendChild(el('span', 'drill-cand' + (isBest ? ' best' : ''),
+        H.review.actionLabel(c) + ' · ' + (c.ev >= 0 ? '+' : '') + num(c.ev)));
+    });
+    host.appendChild(cands);
+    const foot = el('div', 'coach-foot');
+    foot.appendChild(el('span', 'muted', T('coach.note')));
+    const close = el('button', 'mini-btn', T('coach.close'));
+    close.type = 'button';
+    close.id = 'btnCoachClose';
+    close.addEventListener('click', function () { if (opts.onClose) opts.onClose(); });
+    foot.appendChild(close);
+    host.appendChild(foot);
+  };
+
+  /* ==================== 플레이 스타일 진단 ==================== */
+  function fmtStat(v, fmt) { return fmt === 'pct' ? Math.round(v * 100) + '%' : v.toFixed(1); }
+  H.panels.renderStyle = function (diag, host, opts) {
+    opts = opts || {};
+    const card = el('div', 'style-card');
+    card.appendChild(el('h4', 'panel-sub', T('style.title')));
+    if (!diag) {
+      card.appendChild(el('p', 'learn-note', T('style.need', { n: H.style.MIN_HANDS, h: opts.hands || 0 })));
+      host.appendChild(card);
+      return;
+    }
+    const head = el('div', 'style-head');
+    head.appendChild(el('span', 'style-icon', diag.icon));
+    const names = el('div', 'style-names');
+    names.appendChild(el('div', 'style-type', T('style.type.' + diag.type)));
+    names.appendChild(el('div', 'style-desc', T('style.typeDesc.' + diag.type)));
+    head.appendChild(names);
+    const score = el('div', 'style-score' + (diag.score >= 75 ? ' good' : diag.score < 45 ? ' bad' : ''));
+    score.appendChild(el('b', null, String(diag.score)));
+    score.appendChild(el('span', null, T('style.score', { score: '' }).trim()));
+    head.appendChild(score);
+    card.appendChild(head);
+    card.appendChild(el('div', 'style-meta', (opts.saved ? T('style.saved') + ' · ' : '') + T('style.hands', { n: diag.hands })));
+
+    /* 지표 막대: 기준 범위를 띠로, 내 값을 점으로 */
+    const rows = el('div', 'style-rows');
+    diag.rows.forEach(function (r) {
+      const row = el('div', 'style-row s-' + r.status);
+      row.appendChild(el('span', 'sr-name', T('style.stat.' + r.key)));
+      const bar = el('div', 'sr-bar');
+      const max = r.fmt === 'pct' ? 1 : 6;
+      const band = el('div', 'sr-band');
+      band.style.left = (r.lo / max * 100) + '%';
+      band.style.width = ((r.hi - r.lo) / max * 100) + '%';
+      bar.appendChild(band);
+      if (r.status !== 'na') {
+        const dot = el('div', 'sr-dot');
+        dot.style.left = (Math.min(1, r.value / max) * 100) + '%';
+        bar.appendChild(dot);
+      }
+      row.appendChild(bar);
+      row.appendChild(el('span', 'sr-val', r.status === 'na' ? T('style.na') : fmtStat(r.value, r.fmt)));
+      row.title = T('style.range', { lo: fmtStat(r.lo, r.fmt), hi: fmtStat(r.hi, r.fmt) });
+      rows.appendChild(row);
+    });
+    card.appendChild(rows);
+    if (diag.tips.length) {
+      card.appendChild(el('div', 'style-tips-title', T('style.tips')));
+      const ul = el('ul', 'style-tips');
+      diag.tips.forEach(function (k) { ul.appendChild(el('li', null, T(k))); });
+      card.appendChild(ul);
+    }
+    host.appendChild(card);
+  };
+
+  /* ==================== 오늘의 10문제 ==================== */
+  H.panels.renderDaily = function (profile, host, opts) {
+    opts = opts || {};
+    const today = H.drill.dateKey();
+    const rec = profile.dailyFor(today);
+    const card = el('div', 'daily-card');
+    card.appendChild(el('h4', 'panel-sub', T('daily.title')));
+    card.appendChild(el('p', 'learn-note', T('daily.desc')));
+    card.appendChild(el('div', 'daily-status' + (rec ? ' done' : ''), rec
+      ? T('daily.done', { correct: rec.correct, asked: rec.asked, bb: rec.lossBb.toFixed(1) })
+      : T('daily.todo')));
+    const btn = el('button', 'act gold', rec ? T('daily.again') : T('daily.start'));
+    btn.type = 'button';
+    btn.id = 'btnDaily';
+    btn.addEventListener('click', function () { if (opts.onDaily) opts.onDaily(); });
+    card.appendChild(btn);
+    const past = profile.daily.filter(function (d) { return d.date !== today; }).slice(0, 7);
+    if (past.length) {
+      card.appendChild(el('div', 'daily-hist-title', T('daily.history')));
+      const list = el('div', 'daily-hist');
+      past.forEach(function (d) {
+        const row = el('div', 'daily-row');
+        row.appendChild(el('span', 'dr-date', d.date.slice(5)));
+        row.appendChild(el('span', 'dr-score', d.correct + '/' + d.asked));
+        row.appendChild(el('span', 'dr-loss', '-' + d.lossBb.toFixed(1) + ' bb'));
+        list.appendChild(row);
+      });
+      card.appendChild(list);
+    }
+    host.appendChild(card);
+  };
+
   /* ==================== 핸드 리뷰 ==================== */
   H.panels.renderReview = function (summary, host) {
     host.innerHTML = '';
@@ -628,6 +768,7 @@
 
       const detail = el('div', 'review-detail');
       detail.appendChild(el('span', null, H.review.explain(it)));
+      if (it.coached) detail.appendChild(el('span', 'rv-coached', T('coach.used')));
       if (it.best && (it.best.type !== it.chosen.type || it.best.amount !== it.chosen.amount)) {
         detail.appendChild(el('span', 'rv-best', '→ ' + H.review.actionLabel(it.best)));
       }

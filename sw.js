@@ -37,6 +37,7 @@ const SHELL = [
   './js/ai.js',
   './js/review.js',
   './js/profile.js',
+  './js/style.js',
   './js/drill.js',
   './js/history.js',
   './js/storage.js',
