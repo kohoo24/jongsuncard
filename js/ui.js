@@ -1844,6 +1844,24 @@
   /* ==================== 게임 시작 / 복원 ==================== */
   function resetSession() { state.session = { hands: 0, lossBb: 0, byKey: {} }; state.histFilter = 'all'; }
 
+  /* 세로 폰에서 게임을 시작하면 "가로 권장" 안내 — 강제하지 않고, 닫으면 다시 띄우지 않는다 */
+  let rotateHintTimer = null;
+  function portraitPhone() {
+    try { return global.innerWidth < 720 && global.matchMedia('(orientation: portrait)').matches; } catch (e) { return false; }
+  }
+  function showRotateHint() {
+    if (state.settings.rotateHintSeen || !portraitPhone()) return;
+    $('rotateHint').classList.remove('hidden');
+    clearTimeout(rotateHintTimer);
+    rotateHintTimer = setTimeout(hideRotateHint, 12000);
+  }
+  function hideRotateHint() { $('rotateHint').classList.add('hidden'); clearTimeout(rotateHintTimer); }
+  function dismissRotateHint() {
+    hideRotateHint();
+    state.settings.rotateHintSeen = true;
+    H.storage.saveSettings(state.settings);
+  }
+
   function applySettings(s) {
     state.settings = s;
     state.sound = s.sound !== false;
@@ -1860,6 +1878,7 @@
 
   function startGame(s) {
     resetSession();
+    showRotateHint();
     clearTimer(); stopClockTick();
     applySettings(s);
     H.storage.clearSession();
@@ -2089,6 +2108,12 @@
     $('btnReview').addEventListener('click', openReview);
     $('btnCoach').addEventListener('click', openCoach);
     $('btnBetCancel').addEventListener('click', function () { openBetPanel(false); });
+    $('btnRotateHintClose').addEventListener('click', dismissRotateHint);
+    try {
+      const pmq = global.matchMedia('(orientation: portrait)');
+      const onTurn = function (e) { if (!e.matches) hideRotateHint(); };
+      if (pmq.addEventListener) pmq.addEventListener('change', onTurn); else if (pmq.addListener) pmq.addListener(onTurn);
+    } catch (e) { /* matchMedia 없는 환경 */ }
     $('btnDrillNext').addEventListener('click', nextDrillSpot);
     $('btnDrillQuit').addEventListener('click', function () { if (state.drill && state.drill.session.daily && state.drill.session.asked) finishDaily(); else quitDrill(); });
     $('btnDrillFromSetup').addEventListener('click', function () {

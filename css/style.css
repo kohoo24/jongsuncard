@@ -1160,6 +1160,18 @@ button.act.gold.confirm { background: linear-gradient(180deg, #5a2a26, #3f1c19);
 .legend-item i.sw-call { background: var(--success); height: 10px; border-radius: 2px; }
 .legend-item i.sw-three { background: var(--info); height: 10px; border-radius: 2px; }
 
+/* 세로 폰: 가로 권장 안내 (레이아웃을 밀지 않게 상단 바 아래에 띄운다) */
+.rotate-hint {
+  position: fixed; top: 52px; left: 12px; right: 12px; z-index: 40;
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(10, 24, 18, .96); color: var(--text); border: 1px solid rgba(143, 193, 255, .5);
+  border-radius: 12px; padding: 8px 10px 8px 12px; font-size: 12.5px; line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .5);
+}
+.rotate-hint.hidden { display: none; }
+.rotate-hint .rh-icon { flex: none; font-size: 16px; }
+.rotate-hint .rh-close { position: static; width: 26px; height: 26px; font-size: 17px; flex: none; }
+
 /* ---------- 3단계: 베팅 패널 접기 · 리플레이 미니 테이블 · 히트맵 · 주간 리포트 · 모션 ---------- */
 .bet-cancel { display: none; }
 .raise-row.collapsible .bet-cancel { display: inline-block; flex: none; }

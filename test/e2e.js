@@ -951,6 +951,42 @@ async function playHands(page, target, opts) {
     await mp.close();
   }
 
+  console.log('\n[가로 권장 안내]');
+  {
+    const rp = await browser.newPage({ viewport: { width: 393, height: 740 }, isMobile: true, hasTouch: true });
+    await rp.goto(URL);
+    await toSetup(rp);
+    await rp.selectOption('#optBots', '5'); await rp.selectOption('#optSpeed', '350'); await rp.fill('#optSeed', 'ROT1');
+    await rp.click('#btnStart');
+    await rp.waitForTimeout(500);
+    const hint1 = await rp.evaluate(function () {
+      const h = document.getElementById('rotateHint');
+      return { shown: !h.classList.contains('hidden'), text: h.textContent };
+    });
+    check('세로 폰에서 게임을 시작하면 가로 권장 안내가 뜬다 ("권장 사항" 포함)', hint1.shown && /권장 사항/.test(hint1.text), JSON.stringify(hint1));
+    await rp.click('#btnRotateHintClose');
+    await rp.waitForTimeout(150);
+    const hint2 = await rp.evaluate(function () {
+      return { shown: !document.getElementById('rotateHint').classList.contains('hidden'), seen: JSON.parse(localStorage.getItem('holdem.settings')).rotateHintSeen };
+    });
+    check('닫으면 사라지고 다시 띄우지 않도록 저장된다', !hint2.shown && hint2.seen === true, JSON.stringify(hint2));
+    await rp.evaluate(function () { document.getElementById('btnMenu').click(); });
+    await rp.waitForTimeout(150);
+    await rp.click('#btnHomePlay'); await rp.waitForSelector('#setupModal.show');
+    await rp.click('#btnStart'); await rp.waitForTimeout(400);
+    const hint3 = await rp.evaluate(function () { return !document.getElementById('rotateHint').classList.contains('hidden'); });
+    check('닫은 뒤에는 새 게임에서도 뜨지 않는다', !hint3);
+    await rp.close();
+    const lp = await browser.newPage({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true });
+    await lp.goto(URL);
+    await toSetup(lp);
+    await lp.selectOption('#optBots', '5'); await lp.fill('#optSeed', 'ROT2');
+    await lp.click('#btnStart'); await lp.waitForTimeout(400);
+    const hint4 = await lp.evaluate(function () { return !document.getElementById('rotateHint').classList.contains('hidden'); });
+    check('가로 폰에서는 안내가 뜨지 않는다', !hint4);
+    await lp.close();
+  }
+
   console.log('\n[모바일]');
   for (const [label, vp] of [['세로 390x844', { width: 390, height: 844 }], ['가로 844x390', { width: 844, height: 390 }]]) {
     const mErrors = [];

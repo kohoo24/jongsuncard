@@ -537,6 +537,10 @@
     'learn.goalDone': ['완료', 'Done'],
     'learn.goalProgress': ['{a}/{b}', '{a}/{b}'],
 
+    /* --- 가로 권장 안내 (세로 폰) --- */
+    'hint.rotate': ['권장 사항: 폰을 가로로 돌리면 기록 · 리뷰 패널을 테이블 옆에서 바로 볼 수 있습니다',
+      'Recommended: rotate your phone to landscape to see the log and review panel beside the table'],
+
     /* --- 오늘의 10문제 --- */
     'daily.title': ['오늘의 10문제', 'Daily 10'],
     'daily.desc': ['날짜로 고정된 10문제 — 매일 한 세트, 누구나 같은 문제', 'Ten spots fixed by the date — one set a day, the same for everyone'],
