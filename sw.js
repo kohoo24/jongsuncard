@@ -19,10 +19,6 @@ const SHELL = [
   './index.html',
   './manifest.webmanifest',
   './icon.svg',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/maskable-512.png',
-  './icons/apple-touch-180.png',
   './css/font.css',
   './css/style.css',
   './js/cards.js',
@@ -48,12 +44,24 @@ const SHELL = [
   './js/panels.js',
   './js/ui.js'
 ];
+/* 없어도 앱이 도는 것들(설치 아이콘). 한 장이 빠졌다고 셸 갱신이 막히면 안 된다 —
+ * 실제로 아이콘이 배포에서 빠졌을 때 옛 캐시에 영영 갇힌 적이 있다. */
+const EXTRAS = [
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/maskable-512.png',
+  './icons/apple-touch-180.png'
+];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
     caches.open(CACHE)
       /* 한 장이라도 실패하면 셸이 반쪽이 된다 — 통째로 다시 받게 둔다 */
-      .then(function (c) { return c.addAll(SHELL); })
+      .then(function (c) {
+        return c.addAll(SHELL).then(function () {
+          return Promise.all(EXTRAS.map(function (u) { return c.add(u).catch(function () { /* 없으면 건너뛴다 */ }); }));
+        });
+      })
       .then(function () { return self.skipWaiting(); })
   );
 });

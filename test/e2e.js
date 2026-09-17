@@ -956,8 +956,11 @@ async function playHands(page, target, opts) {
     const ip = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     await ip.goto(URL);
     await ip.waitForSelector('#homeModal.show');
-    const card0 = await ip.evaluate(function () { return document.getElementById('homeInstall').classList.contains('hidden'); });
-    check('설치 이벤트가 없는 브라우저에서는 설치 카드가 숨겨진다', card0);
+    const card0 = await ip.evaluate(function () {
+      const card = document.getElementById('homeInstall');
+      return { shown: !card.classList.contains('hidden'), kind: card.dataset.kind, label: document.getElementById('btnInstall').textContent };
+    });
+    check('설치 이벤트가 없어도 카드는 보이고 "설치 방법 보기"로 안내한다 (데스크톱)', card0.shown && card0.kind === 'desktop' && /설치 방법|How to/.test(card0.label), JSON.stringify(card0));
     /* Chrome 의 beforeinstallprompt 를 흉내 낸다 */
     const result = await ip.evaluate(function () {
       let prompted = false;
@@ -995,6 +998,24 @@ async function playHands(page, target, opts) {
     check('iPhone Safari 에서는 "홈 화면에 추가" 안내 카드가 뜬다', ios0.shown && ios0.kind === 'ios' && ios0.steps, JSON.stringify(ios0));
     check('누르면 3단계 설치 방법이 펼쳐진다', ios1.shown && ios1.n === 3 && /홈 화면에 추가|Home Screen/.test(ios1.text), JSON.stringify(ios1));
     await ctx.close();
+    /* 카카오톡 앱 안 브라우저: 설치 불가 → 다른 브라우저로 열기 안내 */
+    const kctx = await browser.newContext({ viewport: { width: 393, height: 740 }, isMobile: true, hasTouch: true,
+      userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 KAKAOTALK/10.5.0' });
+    const kp = await kctx.newPage();
+    await kp.goto(URL);
+    await kp.waitForSelector('#homeModal.show');
+    await kp.click('#btnInstall');
+    await kp.waitForTimeout(150);
+    const kk = await kp.evaluate(function () {
+      const card = document.getElementById('homeInstall');
+      return { kind: card.dataset.kind, desc: document.getElementById('homeInstallDesc').textContent, n: document.getElementById('homeInstallSteps').querySelectorAll('li').length, text: document.getElementById('homeInstallSteps').textContent };
+    });
+    check('카카오톡 안 브라우저에서는 "다른 브라우저로 열기" 안내를 보여준다', kk.kind === 'inapp' && /설치할 수 없|cannot install/.test(kk.desc) && kk.n === 3 && /다른 브라우저|other browser/.test(kk.text), JSON.stringify(kk));
+    await kctx.close();
+    /* 서비스 워커: 아이콘은 없어도 셸 설치를 막지 않는다 · 배포 워크플로가 icons 를 싣는다 */
+    const swSrc = require('fs').readFileSync(require('path').resolve(__dirname, '..', 'sw.js'), 'utf8');
+    const wf = require('fs').readFileSync(require('path').resolve(__dirname, '..', '.github', 'workflows', 'pages.yml'), 'utf8');
+    check('서비스 워커가 아이콘을 선택 캐시(EXTRAS)로 두고, 배포 워크플로가 icons 폴더를 싣는다', /EXTRAS/.test(swSrc) && !/SHELL = \[[^\]]*icons\//.test(swSrc) && /cp -r css js fonts icons site\//.test(wf), 'sw/workflow');
     /* 매니페스트: PNG 아이콘 192 · 512 · 마스커블 */
     const fs = require('fs');
     const manifest = JSON.parse(fs.readFileSync(require('path').resolve(__dirname, '..', 'manifest.webmanifest'), 'utf8'));

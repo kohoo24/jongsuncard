@@ -28,7 +28,11 @@ jobs:
         run: |
           mkdir -p site
           cp index.html manifest.webmanifest icon.svg sw.js site/
-          cp -r css js fonts site/
+          cp -r css js fonts icons site/
+          # 서비스 워커가 미리 받는 파일이 하나라도 빠지면 옛 캐시에 갇힌다 — 여기서 막는다
+          for f in $(grep -oE "'\./[^']+'" site/sw.js | tr -d "'" | grep -v '^\./$'); do
+            [ -f "site/$f" ] || { echo "::error::sw.js 가 캐시하는 $f 가 배포에 없다"; exit 1; }
+          done
           # 서브경로(/jongsuncard/)에서도 돌아가도록 전부 상대경로여야 한다
           if grep -rnE '(href|src)="/|url\("/' site/index.html site/css site/js; then
             echo '::error::절대경로가 있다 — 서브경로 배포에서 깨진다'
