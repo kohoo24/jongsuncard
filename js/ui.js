@@ -1577,6 +1577,67 @@
     openHome();
   }
 
+  /* ==================== 앱으로 설치하기 ==================== */
+  /*
+   * Android Chrome · 데스크톱 Chrome/Edge 는 beforeinstallprompt 를 붙잡아 두었다가 버튼에서 띄운다.
+   * iPhone Safari 는 설치 API 가 없어 "공유 → 홈 화면에 추가" 안내를 보여준다.
+   * 이미 설치된(standalone) 상태나 둘 다 아닌 브라우저에서는 카드를 숨긴다.
+   */
+  let installPrompt = null;
+  function isStandalone() {
+    try { return global.matchMedia('(display-mode: standalone)').matches || global.navigator.standalone === true; } catch (e) { return false; }
+  }
+  function isIosBrowser() {
+    const ua = global.navigator.userAgent || '';
+    return /iphone|ipad|ipod/i.test(ua) && !/crios|fxios/i.test(ua) && !isStandalone();
+  }
+  function updateInstallCard() {
+    const card = $('homeInstall');
+    if (!card) return;
+    const desc = $('homeInstallDesc'), btn = $('btnInstall'), steps = $('homeInstallSteps');
+    if (isStandalone()) { card.classList.add('hidden'); return; }
+    if (installPrompt) {
+      card.classList.remove('hidden');
+      desc.textContent = T('home.installDesc');
+      btn.textContent = T('home.installBtn');
+      steps.classList.add('hidden');
+      card.dataset.kind = 'prompt';
+    } else if (isIosBrowser()) {
+      card.classList.remove('hidden');
+      desc.textContent = T('home.installIosDesc');
+      btn.textContent = steps.classList.contains('hidden') ? T('home.installIosBtn') : T('home.installIosHide');
+      card.dataset.kind = 'ios';
+    } else {
+      card.classList.add('hidden');
+    }
+  }
+  function onInstallClick() {
+    const card = $('homeInstall');
+    if (card.dataset.kind === 'prompt' && installPrompt) {
+      const p = installPrompt;
+      p.prompt();
+      const done = function (choice) {
+        if (choice && choice.outcome === 'accepted') { installPrompt = null; toast(T('home.installed')); }
+        else toast(T('home.installDismissed'));
+        updateInstallCard();
+      };
+      if (p.userChoice && p.userChoice.then) p.userChoice.then(done, function () { done(null); });
+      else done(null);
+    } else if (card.dataset.kind === 'ios') {
+      const steps = $('homeInstallSteps');
+      if (steps.classList.contains('hidden')) {
+        steps.innerHTML = '';
+        ['home.installIos1', 'home.installIos2', 'home.installIos3'].forEach(function (k) {
+          const li = document.createElement('li'); li.textContent = T(k); steps.appendChild(li);
+        });
+        steps.classList.remove('hidden');
+      } else steps.classList.add('hidden');
+      updateInstallCard();
+    }
+  }
+  /* 테스트·다른 모듈에서 설치 이벤트를 흉내 낼 수 있게 노출 */
+  state.setInstallPrompt = function (ev) { installPrompt = ev; updateInstallCard(); };
+
   /* ==================== 홈 (플레이 / 교육) ==================== */
   function openHome() {
     buildSetup();
@@ -1601,6 +1662,7 @@
       ? T('home.styleLine', { icon: st.icon, type: T('style.type.' + st.type), score: st.score })
       : T('home.noStyle');
     line.classList.toggle('muted', !st);
+    updateInstallCard();
     openModal('homeModal');
   }
   function openLearnModal() {
@@ -2135,6 +2197,13 @@
     $('btnCoach').addEventListener('click', openCoach);
     $('btnBetCancel').addEventListener('click', function () { openBetPanel(false); });
     $('btnRotateHintClose').addEventListener('click', dismissRotateHint);
+    $('btnInstall').addEventListener('click', onInstallClick);
+    global.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();          // 브라우저 기본 배너 대신 홈 카드에서 띄운다
+      installPrompt = e;
+      updateInstallCard();
+    });
+    global.addEventListener('appinstalled', function () { installPrompt = null; toast(T('home.installed')); updateInstallCard(); });
     try {
       const pmq = global.matchMedia('(orientation: portrait)');
       const onTurn = function (e) { if (!e.matches) hideRotateHint(); };

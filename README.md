@@ -171,7 +171,7 @@ bb/100)를 내고, 마지막 인자로 상대를 고릅니다(`node test/bench.j
 모바일 세로·가로 대응(펠트가 낮으면 좌석을 압축하고 실제 높이로 배치해 팟·보드와 겹치지 않음, 9인까지) / 햅틱 / 효과음
 
 **기타** · 한국어·영어 / 진행 중인 게임 저장·복원 / 시드 고정(같은 카드 재현) /
-오프라인 설치(PWA) / 키보드 조작 / 스크린리더 대응
+오프라인 설치(PWA, 홈 화면 "앱으로 설치하기" 카드 — Android·데스크톱은 한 번에 설치, iPhone 은 홈 화면에 추가 안내) / 키보드 조작 / 스크린리더 대응
 
 ### 단축키
 
@@ -299,6 +299,7 @@ css/font.css          Pretendard 서브셋 (data URI)
 css/style.css         스타일
 fonts/                폰트 원본·라이선스·서브셋 문자 목록
 manifest.webmanifest  PWA 매니페스트
+icons/                설치용 PNG 아이콘 (192 · 512 · 마스커블 · iOS 180)
 sw.js                 서비스 워커 (오프라인)
 
 js/cards.js           카드 · 덱 · 셔플
@@ -366,7 +367,7 @@ npm run bench      # AI 강도 벤치마크 (TAG 봇 상대 4인, 6시드 × 100
 npm run bench:9    # 같은 벤치마크 9인 풀링 (6시드 × 500핸드, 약 50초)
 npm run solve      # 프리플랍 솔버 테이블 재생성 (약 1분)
 npm run lint       # ESLint
-npm run test:e2e   # 브라우저 E2E 156개 (Playwright 필요)
+npm run test:e2e   # 브라우저 E2E 162개 (Playwright 필요)
 npm run test:sw    # 서비스 워커 갱신 7개 (Playwright 필요)
 ```
 

@@ -537,6 +537,19 @@
     'learn.goalDone': ['완료', 'Done'],
     'learn.goalProgress': ['{a}/{b}', '{a}/{b}'],
 
+    /* --- 앱으로 설치하기 (홈 카드) --- */
+    'home.install': ['앱으로 설치하기', 'Install as an app'],
+    'home.installDesc': ['홈 화면 아이콘으로 전체 화면 실행 · 오프라인에서도 열립니다', 'Full-screen from a home-screen icon, works offline'],
+    'home.installBtn': ['설치', 'Install'],
+    'home.installIosDesc': ['iPhone 은 Safari 에서 홈 화면에 추가하면 앱처럼 열립니다', 'On iPhone, add to the Home Screen from Safari'],
+    'home.installIosBtn': ['설치 방법 보기', 'How to install'],
+    'home.installIosHide': ['닫기', 'Close'],
+    'home.installIos1': ['Safari 아래쪽 공유 버튼(네모에서 화살표)을 누릅니다', 'Tap the Share button (square with an arrow) at the bottom of Safari'],
+    'home.installIos2': ['목록에서 "홈 화면에 추가"를 고릅니다', 'Choose "Add to Home Screen"'],
+    'home.installIos3': ['오른쪽 위 "추가"를 누르면 홈 화면에 아이콘이 생깁니다', 'Tap "Add" at the top right; the icon appears on your Home Screen'],
+    'home.installed': ['설치되었습니다. 홈 화면 아이콘으로 실행하세요', 'Installed. Launch it from your Home Screen'],
+    'home.installDismissed': ['나중에 다시 설치할 수 있습니다', 'You can install later'],
+
     /* --- 가로 권장 안내 (세로 폰) --- */
     'hint.rotate': ['권장 사항: 폰을 가로로 돌리면 기록 · 리뷰 패널을 테이블 옆에서 바로 볼 수 있습니다',
       'Recommended: rotate your phone to landscape to see the log and review panel beside the table'],

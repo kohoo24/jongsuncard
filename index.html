@@ -7,6 +7,11 @@
 <meta name="description" content="AI 상대와 혼자 즐기는 노리밋 텍사스 홀덤">
 <title>텍사스 홀덤</title>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="홀덤">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>♠</text></svg>">
 <link rel="stylesheet" href="css/font.css">
 <link rel="stylesheet" href="css/style.css">
@@ -130,6 +135,14 @@
         <button class="act ghost-btn small" id="btnHomeLearn" data-i18n="home.learnStatus">학습 현황</button>
       </section>
     </div>
+    <section class="home-install hidden" id="homeInstall" aria-labelledby="homeInstallTitle">
+      <div class="hi-text">
+        <h3 id="homeInstallTitle" data-i18n="home.install">앱으로 설치하기</h3>
+        <p class="home-desc" id="homeInstallDesc"></p>
+        <ol class="hi-steps hidden" id="homeInstallSteps"></ol>
+      </div>
+      <button class="act gold" id="btnInstall" type="button" data-i18n="home.installBtn">설치</button>
+    </section>
   </div>
 </div>
 

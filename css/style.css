@@ -1160,6 +1160,20 @@ button.act.gold.confirm { background: linear-gradient(180deg, #5a2a26, #3f1c19);
 .legend-item i.sw-call { background: var(--success); height: 10px; border-radius: 2px; }
 .legend-item i.sw-three { background: var(--info); height: 10px; border-radius: 2px; }
 
+/* 홈: 앱으로 설치하기 카드 */
+.home-install {
+  display: flex; align-items: center; gap: 12px; margin-top: 12px; padding: 12px 14px;
+  background: rgba(143, 193, 255, .07); border: 1px solid rgba(143, 193, 255, .3); border-radius: 12px;
+}
+.home-install.hidden { display: none; }
+.home-install .hi-text { flex: 1; min-width: 0; }
+.home-install h3 { margin: 0; font-size: 14px; }
+.home-install .home-desc { margin: 2px 0 0; }
+.home-install .act { flex: none; width: auto; margin: 0; padding: 10px 16px; min-height: 40px; }
+.hi-steps { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: var(--text); line-height: 1.5; }
+.hi-steps.hidden { display: none; }
+@media (max-width: 560px) { .home-install { flex-direction: column; align-items: stretch; } }
+
 /* 세로 폰: 가로 권장 안내 (레이아웃을 밀지 않게 상단 바 아래에 띄운다) */
 .rotate-hint {
   position: fixed; top: 52px; left: 12px; right: 12px; z-index: 40;

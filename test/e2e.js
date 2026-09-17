@@ -951,6 +951,59 @@ async function playHands(page, target, opts) {
     await mp.close();
   }
 
+  console.log('\n[앱으로 설치하기]');
+  {
+    const ip = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await ip.goto(URL);
+    await ip.waitForSelector('#homeModal.show');
+    const card0 = await ip.evaluate(function () { return document.getElementById('homeInstall').classList.contains('hidden'); });
+    check('설치 이벤트가 없는 브라우저에서는 설치 카드가 숨겨진다', card0);
+    /* Chrome 의 beforeinstallprompt 를 흉내 낸다 */
+    const result = await ip.evaluate(function () {
+      let prompted = false;
+      const ev = { prompt: function () { prompted = true; }, userChoice: Promise.resolve({ outcome: 'accepted' }) };
+      window.HoldemUI.setInstallPrompt(ev);
+      const card = document.getElementById('homeInstall');
+      const shown = !card.classList.contains('hidden');
+      const label = document.getElementById('btnInstall').textContent;
+      document.getElementById('btnInstall').click();
+      return { shown: shown, label: label, prompted: prompted };
+    });
+    await ip.waitForTimeout(200);
+    const after = await ip.evaluate(function () {
+      return { hidden: document.getElementById('homeInstall').classList.contains('hidden'), toast: document.getElementById('toast').textContent };
+    });
+    check('설치 이벤트가 오면 카드가 뜨고, 누르면 설치 프롬프트를 띄운다', result.shown && result.prompted && /설치|Install/.test(result.label), JSON.stringify(result));
+    check('설치를 수락하면 카드가 사라지고 안내가 뜬다', after.hidden && after.toast.length > 0, JSON.stringify(after));
+    await ip.close();
+    /* iPhone Safari: 안내 단계 */
+    const ctx = await browser.newContext({ viewport: { width: 393, height: 740 }, isMobile: true, hasTouch: true,
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' });
+    const sp = await ctx.newPage();
+    await sp.goto(URL);
+    await sp.waitForSelector('#homeModal.show');
+    const ios0 = await sp.evaluate(function () {
+      const card = document.getElementById('homeInstall');
+      return { shown: !card.classList.contains('hidden'), kind: card.dataset.kind, steps: document.getElementById('homeInstallSteps').classList.contains('hidden') };
+    });
+    await sp.click('#btnInstall');
+    await sp.waitForTimeout(150);
+    const ios1 = await sp.evaluate(function () {
+      const steps = document.getElementById('homeInstallSteps');
+      return { shown: !steps.classList.contains('hidden'), n: steps.querySelectorAll('li').length, text: steps.textContent };
+    });
+    check('iPhone Safari 에서는 "홈 화면에 추가" 안내 카드가 뜬다', ios0.shown && ios0.kind === 'ios' && ios0.steps, JSON.stringify(ios0));
+    check('누르면 3단계 설치 방법이 펼쳐진다', ios1.shown && ios1.n === 3 && /홈 화면에 추가|Home Screen/.test(ios1.text), JSON.stringify(ios1));
+    await ctx.close();
+    /* 매니페스트: PNG 아이콘 192 · 512 · 마스커블 */
+    const fs = require('fs');
+    const manifest = JSON.parse(fs.readFileSync(require('path').resolve(__dirname, '..', 'manifest.webmanifest'), 'utf8'));
+    const sizes = manifest.icons.map(function (i) { return i.sizes + ':' + i.purpose; });
+    const pngOk = ['192x192:any', '512x512:any', '512x512:maskable'].every(function (k) { return sizes.indexOf(k) >= 0; });
+    const files = ['icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-180.png'].every(function (f) { return fs.existsSync(require('path').resolve(__dirname, '..', f)); });
+    check('매니페스트에 설치용 PNG 아이콘(192 · 512 · 마스커블)이 있고 파일이 존재한다', pngOk && files, sizes.join(' '));
+  }
+
   console.log('\n[가로 권장 안내]');
   {
     const rp = await browser.newPage({ viewport: { width: 393, height: 740 }, isMobile: true, hasTouch: true });
